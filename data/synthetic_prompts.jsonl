@@ -1,0 +1,119 @@
+{"id": "syn-0000", "category": "factual", "prompt": "When was gRPC introduced?", "target_output_tokens": 54, "synthetic": true}
+{"id": "syn-0001", "category": "factual", "prompt": "When was Redis introduced?", "target_output_tokens": 27, "synthetic": true}
+{"id": "syn-0002", "category": "factual", "prompt": "Who maintains SSH?", "target_output_tokens": 79, "synthetic": true}
+{"id": "syn-0003", "category": "factual", "prompt": "Who maintains Kubernetes?", "target_output_tokens": 44, "synthetic": true}
+{"id": "syn-0004", "category": "factual", "prompt": "What is OAuth 2.0?", "target_output_tokens": 25, "synthetic": true}
+{"id": "syn-0005", "category": "factual", "prompt": "Is gRPC open source?", "target_output_tokens": 55, "synthetic": true}
+{"id": "syn-0006", "category": "factual", "prompt": "When was TLS 1.3 introduced?", "target_output_tokens": 38, "synthetic": true}
+{"id": "syn-0007", "category": "factual", "prompt": "What is SSH?", "target_output_tokens": 73, "synthetic": true}
+{"id": "syn-0008", "category": "factual", "prompt": "When was SSH introduced?", "target_output_tokens": 60, "synthetic": true}
+{"id": "syn-0009", "category": "factual", "prompt": "Who maintains TLS 1.3?", "target_output_tokens": 59, "synthetic": true}
+{"id": "syn-0010", "category": "factual", "prompt": "What port does Kubernetes use by default?", "target_output_tokens": 76, "synthetic": true}
+{"id": "syn-0011", "category": "factual", "prompt": "When was Kubernetes introduced?", "target_output_tokens": 75, "synthetic": true}
+{"id": "syn-0012", "category": "factual", "prompt": "Who maintains the HTTP/2 protocol?", "target_output_tokens": 43, "synthetic": true}
+{"id": "syn-0013", "category": "factual", "prompt": "What is Redis?", "target_output_tokens": 56, "synthetic": true}
+{"id": "syn-0014", "category": "factual", "prompt": "What port does SSH use by default?", "target_output_tokens": 32, "synthetic": true}
+{"id": "syn-0015", "category": "factual", "prompt": "What port does Kafka use by default?", "target_output_tokens": 65, "synthetic": true}
+{"id": "syn-0016", "category": "factual", "prompt": "Who maintains PostgreSQL?", "target_output_tokens": 24, "synthetic": true}
+{"id": "syn-0017", "category": "internal_knowledge", "prompt": "Briefly explain how VPN access works at our company.", "target_output_tokens": 107, "synthetic": true}
+{"id": "syn-0018", "category": "internal_knowledge", "prompt": "Who should I contact about laptop upgrades?", "target_output_tokens": 120, "synthetic": true}
+{"id": "syn-0019", "category": "internal_knowledge", "prompt": "Briefly explain how the on-call rotation works at our company.", "target_output_tokens": 107, "synthetic": true}
+{"id": "syn-0020", "category": "internal_knowledge", "prompt": "What is our company policy on the quarterly planning process?", "target_output_tokens": 143, "synthetic": true}
+{"id": "syn-0021", "category": "internal_knowledge", "prompt": "Briefly explain how the quarterly planning process works at our company.", "target_output_tokens": 130, "synthetic": true}
+{"id": "syn-0022", "category": "internal_knowledge", "prompt": "Where can I find the internal documentation for laptop upgrades?", "target_output_tokens": 138, "synthetic": true}
+{"id": "syn-0023", "category": "internal_knowledge", "prompt": "What is our company policy on remote work?", "target_output_tokens": 98, "synthetic": true}
+{"id": "syn-0024", "category": "internal_knowledge", "prompt": "What is our company policy on expense reimbursement?", "target_output_tokens": 113, "synthetic": true}
+{"id": "syn-0025", "category": "internal_knowledge", "prompt": "Briefly explain how laptop upgrades works at our company.", "target_output_tokens": 97, "synthetic": true}
+{"id": "syn-0026", "category": "internal_knowledge", "prompt": "What is our company policy on the on-call rotation?", "target_output_tokens": 111, "synthetic": true}
+{"id": "syn-0027", "category": "internal_knowledge", "prompt": "Who should I contact about VPN access?", "target_output_tokens": 148, "synthetic": true}
+{"id": "syn-0028", "category": "internal_knowledge", "prompt": "Briefly explain how expense reimbursement works at our company.", "target_output_tokens": 113, "synthetic": true}
+{"id": "syn-0029", "category": "internal_knowledge", "prompt": "What is our company policy on parental leave?", "target_output_tokens": 134, "synthetic": true}
+{"id": "syn-0030", "category": "internal_knowledge", "prompt": "Where can I find the internal documentation for the on-call rotation?", "target_output_tokens": 131, "synthetic": true}
+{"id": "syn-0031", "category": "internal_knowledge", "prompt": "Briefly explain how code review approvals works at our company.", "target_output_tokens": 126, "synthetic": true}
+{"id": "syn-0032", "category": "internal_knowledge", "prompt": "Where can I find the internal documentation for PTO carryover?", "target_output_tokens": 108, "synthetic": true}
+{"id": "syn-0033", "category": "internal_knowledge", "prompt": "What is our company policy on PTO carryover?", "target_output_tokens": 97, "synthetic": true}
+{"id": "syn-0034", "category": "troubleshooting", "prompt": "My shared drive mount keeps failing with a timeout error. How do I fix it?", "target_output_tokens": 284, "synthetic": true}
+{"id": "syn-0035", "category": "troubleshooting", "prompt": "My deployment script keeps failing with a timeout error. How do I fix it?", "target_output_tokens": 284, "synthetic": true}
+{"id": "syn-0036", "category": "troubleshooting", "prompt": "I can't connect to VPN client after the latest update. What should I check?", "target_output_tokens": 167, "synthetic": true}
+{"id": "syn-0037", "category": "troubleshooting", "prompt": "I can't connect to Docker build after the latest update. What should I check?", "target_output_tokens": 228, "synthetic": true}
+{"id": "syn-0038", "category": "troubleshooting", "prompt": "I get a permission denied error when using staging database. What could cause this?", "target_output_tokens": 295, "synthetic": true}
+{"id": "syn-0039", "category": "troubleshooting", "prompt": "I get a permission denied error when using internal wiki. What could cause this?", "target_output_tokens": 145, "synthetic": true}
+{"id": "syn-0040", "category": "troubleshooting", "prompt": "VPN client is running very slowly today. How can I diagnose the problem?", "target_output_tokens": 229, "synthetic": true}
+{"id": "syn-0041", "category": "troubleshooting", "prompt": "shared drive mount is running very slowly today. How can I diagnose the problem?", "target_output_tokens": 127, "synthetic": true}
+{"id": "syn-0042", "category": "troubleshooting", "prompt": "I get a permission denied error when using VPN client. What could cause this?", "target_output_tokens": 260, "synthetic": true}
+{"id": "syn-0043", "category": "troubleshooting", "prompt": "CI pipeline is running very slowly today. How can I diagnose the problem?", "target_output_tokens": 176, "synthetic": true}
+{"id": "syn-0044", "category": "troubleshooting", "prompt": "I get a permission denied error when using SSO login. What could cause this?", "target_output_tokens": 263, "synthetic": true}
+{"id": "syn-0045", "category": "troubleshooting", "prompt": "I can't connect to staging database after the latest update. What should I check?", "target_output_tokens": 229, "synthetic": true}
+{"id": "syn-0046", "category": "troubleshooting", "prompt": "My CI pipeline keeps failing with a timeout error. How do I fix it?", "target_output_tokens": 255, "synthetic": true}
+{"id": "syn-0047", "category": "troubleshooting", "prompt": "deployment script is running very slowly today. How can I diagnose the problem?", "target_output_tokens": 150, "synthetic": true}
+{"id": "syn-0048", "category": "troubleshooting", "prompt": "I can't connect to shared drive mount after the latest update. What should I check?", "target_output_tokens": 139, "synthetic": true}
+{"id": "syn-0049", "category": "troubleshooting", "prompt": "I can't connect to CI pipeline after the latest update. What should I check?", "target_output_tokens": 195, "synthetic": true}
+{"id": "syn-0050", "category": "troubleshooting", "prompt": "I can't connect to deployment script after the latest update. What should I check?", "target_output_tokens": 295, "synthetic": true}
+{"id": "syn-0051", "category": "coding", "prompt": "How do I merges two sorted arrays in JavaScript?", "target_output_tokens": 282, "synthetic": true}
+{"id": "syn-0052", "category": "coding", "prompt": "Write a Python function that computes a rolling average.", "target_output_tokens": 179, "synthetic": true}
+{"id": "syn-0053", "category": "coding", "prompt": "Explain what this does and suggest improvements: a loop that flattens a nested dictionary.", "target_output_tokens": 202, "synthetic": true}
+{"id": "syn-0054", "category": "coding", "prompt": "Explain what this does and suggest improvements: a loop that computes a rolling average.", "target_output_tokens": 271, "synthetic": true}
+{"id": "syn-0055", "category": "coding", "prompt": "Write a Python function that reads a JSON config with defaults.", "target_output_tokens": 266, "synthetic": true}
+{"id": "syn-0056", "category": "coding", "prompt": "Write a Python function that merges two sorted arrays.", "target_output_tokens": 195, "synthetic": true}
+{"id": "syn-0057", "category": "coding", "prompt": "How do I computes a rolling average in JavaScript?", "target_output_tokens": 212, "synthetic": true}
+{"id": "syn-0058", "category": "coding", "prompt": "Explain what this does and suggest improvements: a loop that merges two sorted arrays.", "target_output_tokens": 232, "synthetic": true}
+{"id": "syn-0059", "category": "coding", "prompt": "How do I reads a JSON config with defaults in JavaScript?", "target_output_tokens": 215, "synthetic": true}
+{"id": "syn-0060", "category": "coding", "prompt": "Write a unit test for a function that retries an HTTP request with backoff.", "target_output_tokens": 130, "synthetic": true}
+{"id": "syn-0061", "category": "coding", "prompt": "Write a unit test for a function that reads a JSON config with defaults.", "target_output_tokens": 163, "synthetic": true}
+{"id": "syn-0062", "category": "coding", "prompt": "How do I parses a CSV file into a list of dicts in JavaScript?", "target_output_tokens": 157, "synthetic": true}
+{"id": "syn-0063", "category": "coding", "prompt": "Explain what this does and suggest improvements: a loop that deduplicates a list while preserving order.", "target_output_tokens": 116, "synthetic": true}
+{"id": "syn-0064", "category": "coding", "prompt": "Write a unit test for a function that computes a rolling average.", "target_output_tokens": 186, "synthetic": true}
+{"id": "syn-0065", "category": "coding", "prompt": "Explain what this does and suggest improvements: a loop that reads a JSON config with defaults.", "target_output_tokens": 105, "synthetic": true}
+{"id": "syn-0066", "category": "coding", "prompt": "Write a unit test for a function that merges two sorted arrays.", "target_output_tokens": 250, "synthetic": true}
+{"id": "syn-0067", "category": "coding", "prompt": "Write a Python function that deduplicates a list while preserving order.", "target_output_tokens": 241, "synthetic": true}
+{"id": "syn-0068", "category": "reasoning", "prompt": "Walk through the trade-offs of monolith vs microservices and give a recommendation.", "target_output_tokens": 309, "synthetic": true}
+{"id": "syn-0069", "category": "reasoning", "prompt": "We are deciding on self-hosting an LLM vs using a hosted API. Reason through the risks and benefits in detail.", "target_output_tokens": 476, "synthetic": true}
+{"id": "syn-0070", "category": "reasoning", "prompt": "We are deciding on monolith vs microservices. Reason through the risks and benefits in detail.", "target_output_tokens": 267, "synthetic": true}
+{"id": "syn-0071", "category": "reasoning", "prompt": "Compare building vs buying an internal ticketing tool and explain which is better for a mid-sized team, step by step.", "target_output_tokens": 492, "synthetic": true}
+{"id": "syn-0072", "category": "reasoning", "prompt": "Walk through the trade-offs of moving our CI from Jenkins to GitHub Actions and give a recommendation.", "target_output_tokens": 495, "synthetic": true}
+{"id": "syn-0073", "category": "reasoning", "prompt": "Compare self-hosting an LLM vs using a hosted API and explain which is better for a mid-sized team, step by step.", "target_output_tokens": 442, "synthetic": true}
+{"id": "syn-0074", "category": "reasoning", "prompt": "Walk through the trade-offs of building vs buying an internal ticketing tool and give a recommendation.", "target_output_tokens": 324, "synthetic": true}
+{"id": "syn-0075", "category": "reasoning", "prompt": "Compare a four-day work week for the support team and explain which is better for a mid-sized team, step by step.", "target_output_tokens": 442, "synthetic": true}
+{"id": "syn-0076", "category": "reasoning", "prompt": "We are deciding on SQL vs NoSQL for our order system. Reason through the risks and benefits in detail.", "target_output_tokens": 408, "synthetic": true}
+{"id": "syn-0077", "category": "reasoning", "prompt": "We are deciding on building vs buying an internal ticketing tool. Reason through the risks and benefits in detail.", "target_output_tokens": 297, "synthetic": true}
+{"id": "syn-0078", "category": "reasoning", "prompt": "Compare moving our CI from Jenkins to GitHub Actions and explain which is better for a mid-sized team, step by step.", "target_output_tokens": 248, "synthetic": true}
+{"id": "syn-0079", "category": "reasoning", "prompt": "We are deciding on moving our CI from Jenkins to GitHub Actions. Reason through the risks and benefits in detail.", "target_output_tokens": 249, "synthetic": true}
+{"id": "syn-0080", "category": "reasoning", "prompt": "Walk through the trade-offs of self-hosting an LLM vs using a hosted API and give a recommendation.", "target_output_tokens": 420, "synthetic": true}
+{"id": "syn-0081", "category": "reasoning", "prompt": "Walk through the trade-offs of a four-day work week for the support team and give a recommendation.", "target_output_tokens": 381, "synthetic": true}
+{"id": "syn-0082", "category": "reasoning", "prompt": "Compare SQL vs NoSQL for our order system and explain which is better for a mid-sized team, step by step.", "target_output_tokens": 416, "synthetic": true}
+{"id": "syn-0083", "category": "reasoning", "prompt": "Compare monolith vs microservices and explain which is better for a mid-sized team, step by step.", "target_output_tokens": 410, "synthetic": true}
+{"id": "syn-0084", "category": "reasoning", "prompt": "We are deciding on a four-day work week for the support team. Reason through the risks and benefits in detail.", "target_output_tokens": 439, "synthetic": true}
+{"id": "syn-0085", "category": "summarization", "prompt": "Give a detailed summary of the attached design document for the billing migration.", "target_output_tokens": 238, "synthetic": true}
+{"id": "syn-0086", "category": "summarization", "prompt": "Summarize the following meeting notes about the billing migration: The team discussed timelines, owners, open risks, budget constraints, and next steps for the coming quarter.", "target_output_tokens": 426, "synthetic": true}
+{"id": "syn-0087", "category": "summarization", "prompt": "Summarize the following meeting notes about the search reindexing effort: The team discussed timelines, owners, open risks, budget constraints, and next steps for the coming quarter.", "target_output_tokens": 481, "synthetic": true}
+{"id": "syn-0088", "category": "summarization", "prompt": "Summarize the following meeting notes about the new onboarding flow: The team discussed timelines, owners, open risks, budget constraints, and next steps for the coming quarter.", "target_output_tokens": 250, "synthetic": true}
+{"id": "syn-0089", "category": "summarization", "prompt": "Give a detailed summary of the attached design document for the new onboarding flow.", "target_output_tokens": 225, "synthetic": true}
+{"id": "syn-0090", "category": "summarization", "prompt": "Summarize this incident report on the new onboarding flow, including root cause, impact, timeline, and remediation items.", "target_output_tokens": 476, "synthetic": true}
+{"id": "syn-0091", "category": "summarization", "prompt": "Give a detailed summary of the attached design document for the Q3 outage.", "target_output_tokens": 207, "synthetic": true}
+{"id": "syn-0092", "category": "summarization", "prompt": "Summarize this incident report on the Q3 outage, including root cause, impact, timeline, and remediation items.", "target_output_tokens": 247, "synthetic": true}
+{"id": "syn-0093", "category": "summarization", "prompt": "Summarize this incident report on the data retention project, including root cause, impact, timeline, and remediation items.", "target_output_tokens": 321, "synthetic": true}
+{"id": "syn-0094", "category": "summarization", "prompt": "Summarize this incident report on the search reindexing effort, including root cause, impact, timeline, and remediation items.", "target_output_tokens": 285, "synthetic": true}
+{"id": "syn-0095", "category": "summarization", "prompt": "Give a detailed summary of the attached design document for the search reindexing effort.", "target_output_tokens": 408, "synthetic": true}
+{"id": "syn-0096", "category": "summarization", "prompt": "Give a detailed summary of the attached design document for the data retention project.", "target_output_tokens": 448, "synthetic": true}
+{"id": "syn-0097", "category": "summarization", "prompt": "Summarize the following meeting notes about the mobile app redesign: The team discussed timelines, owners, open risks, budget constraints, and next steps for the coming quarter.", "target_output_tokens": 446, "synthetic": true}
+{"id": "syn-0098", "category": "summarization", "prompt": "Summarize this incident report on the mobile app redesign, including root cause, impact, timeline, and remediation items.", "target_output_tokens": 309, "synthetic": true}
+{"id": "syn-0099", "category": "summarization", "prompt": "Summarize this incident report on the billing migration, including root cause, impact, timeline, and remediation items.", "target_output_tokens": 405, "synthetic": true}
+{"id": "syn-0100", "category": "summarization", "prompt": "Give a detailed summary of the attached design document for the mobile app redesign.", "target_output_tokens": 230, "synthetic": true}
+{"id": "syn-0101", "category": "summarization", "prompt": "Summarize the following meeting notes about the data retention project: The team discussed timelines, owners, open risks, budget constraints, and next steps for the coming quarter.", "target_output_tokens": 284, "synthetic": true}
+{"id": "syn-0102", "category": "structured_generation", "prompt": "Generate a JSON object describing a nightly backup job with fields for name, owner, status, and tags.", "target_output_tokens": 291, "synthetic": true}
+{"id": "syn-0103", "category": "structured_generation", "prompt": "Create a markdown table listing the support escalation matrix with columns for item, priority, and due date.", "target_output_tokens": 180, "synthetic": true}
+{"id": "syn-0104", "category": "structured_generation", "prompt": "Draft a YAML config for the support escalation matrix.", "target_output_tokens": 114, "synthetic": true}
+{"id": "syn-0105", "category": "structured_generation", "prompt": "Generate a JSON object describing a feature flag rollout with fields for name, owner, status, and tags.", "target_output_tokens": 112, "synthetic": true}
+{"id": "syn-0106", "category": "structured_generation", "prompt": "Generate a JSON object describing the team's OKRs with fields for name, owner, status, and tags.", "target_output_tokens": 249, "synthetic": true}
+{"id": "syn-0107", "category": "structured_generation", "prompt": "Create a markdown table listing a nightly backup job with columns for item, priority, and due date.", "target_output_tokens": 222, "synthetic": true}
+{"id": "syn-0108", "category": "structured_generation", "prompt": "Generate a JSON object describing the release checklist with fields for name, owner, status, and tags.", "target_output_tokens": 228, "synthetic": true}
+{"id": "syn-0109", "category": "structured_generation", "prompt": "Create a markdown table listing a feature flag rollout with columns for item, priority, and due date.", "target_output_tokens": 235, "synthetic": true}
+{"id": "syn-0110", "category": "structured_generation", "prompt": "Create a markdown table listing the team's OKRs with columns for item, priority, and due date.", "target_output_tokens": 140, "synthetic": true}
+{"id": "syn-0111", "category": "structured_generation", "prompt": "Create a markdown table listing our microservices with columns for item, priority, and due date.", "target_output_tokens": 114, "synthetic": true}
+{"id": "syn-0112", "category": "structured_generation", "prompt": "Draft a YAML config for the team's OKRs.", "target_output_tokens": 230, "synthetic": true}
+{"id": "syn-0113", "category": "structured_generation", "prompt": "Create a markdown table listing the release checklist with columns for item, priority, and due date.", "target_output_tokens": 120, "synthetic": true}
+{"id": "syn-0114", "category": "structured_generation", "prompt": "Draft a YAML config for the release checklist.", "target_output_tokens": 147, "synthetic": true}
+{"id": "syn-0115", "category": "structured_generation", "prompt": "Draft a YAML config for a nightly backup job.", "target_output_tokens": 117, "synthetic": true}
+{"id": "syn-0116", "category": "structured_generation", "prompt": "Generate a JSON object describing the support escalation matrix with fields for name, owner, status, and tags.", "target_output_tokens": 252, "synthetic": true}
+{"id": "syn-0117", "category": "structured_generation", "prompt": "Draft a YAML config for a feature flag rollout.", "target_output_tokens": 117, "synthetic": true}
+{"id": "syn-0118", "category": "structured_generation", "prompt": "Generate a JSON object describing our microservices with fields for name, owner, status, and tags.", "target_output_tokens": 272, "synthetic": true}
