@@ -3,3 +3,5 @@ artifacts/
 __pycache__/
 .pytest_cache/
 .DS_Store
+data/raw/
+data/labels/mock/

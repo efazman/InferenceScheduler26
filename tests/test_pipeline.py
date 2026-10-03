@@ -116,7 +116,7 @@ def test_save_and_reload_roundtrip(untrained_predictor, tmp_path):
 def test_baseline_roundtrip(untrained_predictor, tmp_path):
     tok = untrained_predictor.tokenizer
     prompts = ["short", "a somewhat longer prompt here", "an even longer prompt with many more words in it"]
-    base = PromptLengthBaseline(tok).fit(prompts, [20, 60, 120])
+    base = PromptLengthBaseline.from_spec("distilbert", tok).fit(prompts, [20, 60, 120])
     base.save(tmp_path / "baseline.json")
     again = PromptLengthBaseline.load(tmp_path / "baseline.json", tok)
     np.testing.assert_allclose(again.predict(prompts), base.predict(prompts))

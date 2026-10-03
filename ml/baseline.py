@@ -11,19 +11,25 @@ from pathlib import Path
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
+from ml.prompt_tokens import TokenCounter, make_token_counter
+
 
 class PromptLengthBaseline:
-    def __init__(self, tokenizer, coef: float = 0.0, intercept: float = 0.0):
-        # REAL-DATA: prompt length is counted with the predictor's (DistilBERT) tokenizer. Once the
-        # Llama model is chosen, consider counting with the Llama tokenizer instead, since that is
-        # what the serving backend actually sees.
-        self.tokenizer = tokenizer
+    def __init__(self, count_tokens: TokenCounter, counter_spec: str = "distilbert",
+                 coef: float = 0.0, intercept: float = 0.0):
+        # counter_spec is saved with the model so a reload counts tokens the same way
+        # (see ml/prompt_tokens.py; real Llama runs use "llamacpp:<url>").
+        self.count_tokens = count_tokens
+        self.counter_spec = counter_spec
         self.coef = coef
         self.intercept = intercept
 
+    @classmethod
+    def from_spec(cls, counter_spec: str, fallback_tokenizer=None) -> "PromptLengthBaseline":
+        return cls(make_token_counter(counter_spec, fallback_tokenizer), counter_spec)
+
     def prompt_token_counts(self, prompts: list[str]) -> np.ndarray:
-        return np.array([len(self.tokenizer(p, add_special_tokens=False)["input_ids"]) for p in prompts],
-                        dtype=np.float64)
+        return np.array([self.count_tokens(p) for p in prompts], dtype=np.float64)
 
     def fit(self, prompts: list[str], targets) -> "PromptLengthBaseline":
         reg = LinearRegression().fit(self.prompt_token_counts(prompts).reshape(-1, 1),
@@ -38,10 +44,12 @@ class PromptLengthBaseline:
     def save(self, path: str | Path) -> None:
         Path(path).write_text(json.dumps({
             "type": "linear_regression_on_prompt_token_count",
+            "prompt_token_counter": self.counter_spec,
             "coef": self.coef, "intercept": self.intercept,
         }, indent=2))
 
     @classmethod
-    def load(cls, path: str | Path, tokenizer) -> "PromptLengthBaseline":
+    def load(cls, path: str | Path, fallback_tokenizer=None) -> "PromptLengthBaseline":
         raw = json.loads(Path(path).read_text())
-        return cls(tokenizer, raw["coef"], raw["intercept"])
+        spec = raw.get("prompt_token_counter", "distilbert")  # artifacts from before this field existed
+        return cls(make_token_counter(spec, fallback_tokenizer), spec, raw["coef"], raw["intercept"])

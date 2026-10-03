@@ -142,28 +142,73 @@ def save_jsonl(examples: list[dict], path: str | Path) -> None:
             f.write(json.dumps(ex) + "\n")
 
 
-def load_jsonl(path: str | Path) -> list[dict]:
-    # REAL-DATA: the real label file must provide at least "prompt" and an integer
-    # "target_output_tokens" (the p90 over repeated generations). Other fields are kept as-is.
+def load_jsonl(path: str | Path, target_field: str = "target_output_tokens",
+               allow_mock: bool = False) -> list[dict]:
+    """Load labelled prompts and normalize them to {"id", "prompt", "target_output_tokens", ...}.
+
+    Accepts both the synthetic file ("id", "target_output_tokens") and real label files from
+    datagen.generate_labels ("prompt_id", "target_p90_output_tokens"). ``target_field`` names the
+    label column; its value is copied to "target_output_tokens", which the rest of the pipeline
+    uses. "category" and all other fields are kept as-is. MockBackend labels ("is_mock": true)
+    are refused unless ``allow_mock`` is set, so they can never end up in a real training run.
+    """
     with Path(path).open() as f:
         examples = [json.loads(line) for line in f if line.strip()]
     for i, ex in enumerate(examples):
-        if "prompt" not in ex or "target_output_tokens" not in ex:
-            raise ValueError(f"example {i} missing 'prompt' or 'target_output_tokens'")
-        ex.setdefault("id", f"ex-{i:05d}")
+        if ex.get("is_mock") and not allow_mock:
+            raise ValueError(f"{path} contains MOCK labels (example {i}); they are test-only and "
+                             "must not be used for training or evaluation")
+        if not isinstance(ex.get("prompt"), str) or target_field not in ex:
+            raise ValueError(f"example {i} in {path} missing 'prompt' or '{target_field}'")
+        target = ex[target_field]
+        if not isinstance(target, (int, float)) or not np.isfinite(target) or target < 0:
+            raise ValueError(f"example {i} in {path} has invalid {target_field}={target!r}")
+        ex["target_output_tokens"] = target
+        ex.setdefault("id", ex.get("prompt_id") or f"ex-{i:05d}")
+    ids = [ex["id"] for ex in examples]
+    if len(ids) != len(set(ids)):
+        raise ValueError(f"{path} has duplicate ids")
     return examples
 
 
-def split_dataset(examples: list[dict], train_frac: float, val_frac: float, seed: int):
-    """Shuffle with ``seed`` and split into (train, val, test); test gets the remainder."""
-    # REAL-DATA: consider a split stratified by category (or grouped by source prompt template)
-    # so near-duplicate prompts never straddle train/test.
-    idx = list(range(len(examples)))
-    random.Random(seed).shuffle(idx)
-    n_train = int(round(train_frac * len(idx)))
-    n_val = int(round(val_frac * len(idx)))
+def split_dataset(examples: list[dict], train_frac: float, val_frac: float, seed: int,
+                  strategy: str = "random"):
+    """Split into (train, val, test) with ``seed``; test gets the remainder.
+
+    "random": one shuffle of all examples. "stratified": the same fractions applied within each
+    "category" (missing category = its own group), so every workload type appears in every split.
+    """
+    if strategy == "random":
+        groups = {None: list(range(len(examples)))}
+    elif strategy == "stratified":
+        groups = {}
+        for i, ex in enumerate(examples):
+            groups.setdefault(str(ex.get("category")), []).append(i)
+    else:
+        raise ValueError(f"unknown split strategy {strategy!r}")
+    rng = random.Random(seed)
+    tr, va, te = [], [], []
+    for key in sorted(groups, key=str):
+        idx = groups[key]
+        rng.shuffle(idx)
+        n_train = int(round(train_frac * len(idx)))
+        n_val = int(round(val_frac * len(idx)))
+        tr += idx[:n_train]
+        va += idx[n_train:n_train + n_val]
+        te += idx[n_train + n_val:]
     pick = lambda ids: [examples[i] for i in ids]  # noqa: E731
-    return pick(idx[:n_train]), pick(idx[n_train:n_train + n_val]), pick(idx[n_train + n_val:])
+    return pick(tr), pick(va), pick(te)
+
+
+def assert_disjoint_splits(*splits: list[dict]) -> None:
+    """Leakage guard: no prompt (exact text, whitespace/case-normalized) may appear in two splits."""
+    # REAL-DATA: near-duplicate LMSYS prompts (same template, different names) are not caught here.
+    seen: dict[str, int] = {}
+    for s_idx, split in enumerate(splits):
+        for ex in split:
+            key = " ".join(ex["prompt"].lower().split())
+            if seen.setdefault(key, s_idx) != s_idx:
+                raise ValueError(f"prompt appears in splits {seen[key]} and {s_idx}: {ex['prompt'][:80]!r}")
 
 
 # ---------------------------------------------------------------------------

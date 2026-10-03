@@ -60,7 +60,7 @@ def evaluate_split(predictor, baseline: PromptLengthBaseline, examples: list[dic
 
 def load_split(artifacts: Path, config: Config, split: str) -> list[dict]:
     ids = json.loads((artifacts / "splits.json").read_text())[split]
-    by_id = {ex["id"]: ex for ex in load_jsonl(config.data_path)}
+    by_id = {ex["id"]: ex for ex in load_jsonl(config.data_path, config.target_field, config.allow_mock_labels)}
     missing = [i for i in ids if i not in by_id]
     if missing:
         raise ValueError(f"{len(missing)} {split} ids not found in {config.data_path}; "
@@ -72,17 +72,22 @@ def main(argv=None) -> dict:
     from ml.predictor import LengthPredictor
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--artifacts", default=Config().output_dir)
+    parser.add_argument("--artifacts", default=None,
+                        help="default: the synthetic artifacts dir, or the real one with --real")
+    parser.add_argument("--real", action="store_true")
     parser.add_argument("--split", default="test", choices=["train", "val", "test"])
     args = parser.parse_args(argv)
-    artifacts = Path(args.artifacts)
+    artifacts = Path(args.artifacts or (Config.for_real_data() if args.real else Config()).output_dir)
 
     predictor = LengthPredictor.load(artifacts)
     baseline = PromptLengthBaseline.load(artifacts / "baseline.json", predictor.tokenizer)
     results = evaluate_split(predictor, baseline, load_split(artifacts, predictor.config, args.split),
                              predictor.config)
     results["split"] = args.split
-    results["warning"] = "SYNTHETIC labels: numbers validate the code path only."  # REAL-DATA: remove
+    if (artifacts / "eval_results.json").exists():  # carry the synthetic/mock warning from training
+        warning = json.loads((artifacts / "eval_results.json").read_text()).get("warning")
+        if warning:
+            results["warning"] = warning
     print(json.dumps(results, indent=2))
     return results
 

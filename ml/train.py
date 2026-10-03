@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import random
 from pathlib import Path
@@ -16,12 +17,16 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
 from ml.baseline import PromptLengthBaseline
-from ml.config import Config, resolve_device
-from ml.data import (LengthDataset, compute_quantile_bins, generate_synthetic_dataset, load_jsonl,
-                     make_collate, save_jsonl, split_dataset)
+from ml.config import PROJECT_ROOT, Config, resolve_device
+from ml.data import (LengthDataset, assert_disjoint_splits, compute_quantile_bins, generate_synthetic_dataset,
+                     load_jsonl, make_collate, save_jsonl, split_dataset)
 from ml.evaluate import compute_metrics, evaluate_split
 from ml.model import LengthPredictorModel, joint_loss
 from ml.predictor import LengthPredictor
+
+
+SYNTHETIC_DATA_PATH = PROJECT_ROOT / "data" / "synthetic_prompts.jsonl"
+SYNTHETIC_WARNING = "SYNTHETIC or MOCK labels: numbers validate the code path only."
 
 
 def set_seed(seed: int) -> None:
@@ -60,18 +65,22 @@ def train(config: Config) -> dict:
     set_seed(config.seed)
     device = resolve_device(config.device)
     out_dir = Path(config.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     # --- data ---------------------------------------------------------------
     data_path = Path(config.data_path)
     if not data_path.exists():
-        # SYNTHETIC: only the placeholder dataset is auto-generated.
-        # REAL-DATA: remove this fallback; a missing real label file should be an error.
+        if data_path.resolve() != SYNTHETIC_DATA_PATH.resolve():
+            raise FileNotFoundError(f"label file {data_path} not found; run datagen.generate_labels first")
+        # SYNTHETIC: only the placeholder dataset is ever auto-generated.
         save_jsonl(generate_synthetic_dataset(seed=config.seed), data_path)
         print(f"generated SYNTHETIC dataset at {data_path}")
-    examples = load_jsonl(data_path)
-    train_ex, val_ex, test_ex = split_dataset(examples, config.train_frac, config.val_frac, config.seed)
-    print(f"split: train={len(train_ex)} val={len(val_ex)} test={len(test_ex)}")
+    examples = load_jsonl(data_path, config.target_field, config.allow_mock_labels)
+    synthetic = any(ex.get("synthetic") or ex.get("is_mock") for ex in examples)
+    train_ex, val_ex, test_ex = split_dataset(examples, config.train_frac, config.val_frac, config.seed,
+                                              config.split_strategy)
+    assert_disjoint_splits(train_ex, val_ex, test_ex)
+    print(f"split ({config.split_strategy}): train={len(train_ex)} val={len(val_ex)} test={len(test_ex)}")
+    out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "splits.json").write_text(json.dumps(
         {name: [ex["id"] for ex in split] for name, split in
          (("train", train_ex), ("val", val_ex), ("test", test_ex))}, indent=2))
@@ -106,15 +115,19 @@ def train(config: Config) -> dict:
     # --- save + evaluate --------------------------------------------------------
     predictor = LengthPredictor(model, tokenizer, config, boundaries, centers, mse_scale, device)
     predictor.save(out_dir)
-    baseline = PromptLengthBaseline(tokenizer).fit([ex["prompt"] for ex in train_ex], train_targets)
+    baseline = PromptLengthBaseline.from_spec(config.prompt_token_counter, tokenizer)
+    baseline.fit([ex["prompt"] for ex in train_ex], train_targets)
     baseline.save(out_dir / "baseline.json")
 
     results = {
-        "warning": "SYNTHETIC labels: numbers validate the code path only.",  # REAL-DATA: remove
+        "data_path": str(data_path),
+        "target_field": config.target_field,
         "history": history,
         "val": evaluate_split(predictor, baseline, val_ex, config),
         "test": evaluate_split(predictor, baseline, test_ex, config),
     }
+    if synthetic:
+        results["warning"] = SYNTHETIC_WARNING
     (out_dir / "eval_results.json").write_text(json.dumps(results, indent=2))
     print("test:", json.dumps(results["test"], indent=2))
     print(f"artifacts saved to {out_dir}")
@@ -122,10 +135,15 @@ def train(config: Config) -> dict:
 
 
 def main(argv=None):
-    defaults = Config()
-    parser = argparse.ArgumentParser()
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--real", action="store_true",
+                     help="train on real Llama labels (Config.for_real_data) instead of the synthetic file")
+    defaults = Config.for_real_data() if pre.parse_known_args(argv)[0].real else Config()
+    parser = argparse.ArgumentParser(parents=[pre])
     parser.add_argument("--data", default=defaults.data_path)
     parser.add_argument("--output-dir", default=defaults.output_dir)
+    parser.add_argument("--prompt-token-counter", default=defaults.prompt_token_counter,
+                        help="baseline tokenizer: distilbert | llamacpp:<url> | hf:<name>")
     parser.add_argument("--epochs", type=int, default=defaults.epochs)
     parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
     parser.add_argument("--lr", type=float, default=defaults.learning_rate)
@@ -134,9 +152,11 @@ def main(argv=None):
     parser.add_argument("--device", default=defaults.device)
     parser.add_argument("--seed", type=int, default=defaults.seed)
     args = parser.parse_args(argv)
-    config = Config(data_path=args.data, output_dir=args.output_dir, epochs=args.epochs,
-                    batch_size=args.batch_size, learning_rate=args.lr, loss_lambda=args.loss_lambda,
-                    pooling=args.pooling, device=args.device, seed=args.seed)
+    config = dataclasses.replace(
+        defaults, data_path=args.data, output_dir=args.output_dir, epochs=args.epochs,
+        batch_size=args.batch_size, learning_rate=args.lr, loss_lambda=args.loss_lambda,
+        pooling=args.pooling, device=args.device, seed=args.seed,
+        prompt_token_counter=args.prompt_token_counter)
     return train(config)
 
 
