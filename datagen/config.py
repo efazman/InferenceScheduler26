@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 
 # --- experiment ---------------------------------------------------------------
-NUM_PROMPTS = 500
+NUM_PROMPTS = 2000
 NUM_GENERATIONS = 4
 SEED = 42
 # One distinct, deterministic sampling seed per repeated generation (same set for every prompt).
@@ -25,15 +25,20 @@ GENERATION_SEEDS = [SEED + i for i in range(NUM_GENERATIONS)]
 TARGET_PERCENTILE = 90  # target = this percentile of the NUM_GENERATIONS output-token counts
 PERCENTILE_METHOD = "linear"  # numpy percentile method; with 4 runs p90 = x3 + 0.7 * (x4 - x3)
 TARGET_FIELD = f"target_p{TARGET_PERCENTILE}_output_tokens"  # field the DistilBERT pipeline trains on
+# Prompt counts at which a standalone, independently trainable label snapshot is cut (datagen.make_checkpoint).
+CHECKPOINT_SIZES = [250, 500, 1000, 2000]
 
 # --- model / decoding ---------------------------------------------------------
 MODEL_NAME = "Llama-3.1-8B-Instruct"
 QUANTIZATION = "Q4_K_M"
 RUNTIME = "llama.cpp"
+# Exact llama.cpp build that produced a label set. Recorded with every label, and a resume with a
+# different build is refused, so two runtimes can never be mixed into one dataset.
+RUNTIME_VERSION = os.environ.get("LLAMA_CPP_BUILD", "b11381-836d57176-win-cuda-12.4-x64")
 HARDWARE = "RTX 3060 Ti 8GB"
 TEMPERATURE = 0.7
 TOP_P = 0.9
-MAX_NEW_TOKENS = 512
+MAX_NEW_TOKENS = 1024
 # DECISION: exact fixed system prompt. Its SHA-256 is recorded with every label so a change is detectable.
 SYSTEM_PROMPT = "You are a helpful assistant."
 SYSTEM_PROMPT_SHA256 = hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest()
@@ -54,7 +59,8 @@ SUBSET_PATH = DATA_DIR / "lmsys" / f"subset_{NUM_PROMPTS}.jsonl"
 
 LANGUAGE = "English"
 MIN_PROMPT_CHARS = 1  # after stripping whitespace; anything shorter is treated as empty
-# Keeps prompt + system prompt + MAX_NEW_TOKENS inside a 4096-token llama.cpp context (~4 chars/token).
+# Keeps prompt + system prompt + MAX_NEW_TOKENS inside a 4096-token llama.cpp context (~4 chars/token):
+# 8000 chars ~= 2000 tokens worst case + 1024 generated = ~3024. The selected subset maxes at 2719 chars.
 MAX_PROMPT_CHARS = 8000
 # DECISION: dropping prompts the OpenAI moderation pass flagged keeps the workload closer to an
 # enterprise assistant. Set False to keep them.
@@ -85,6 +91,7 @@ def generation_config(backend_name: str) -> dict:
         "model": MODEL_NAME,
         "quantization": QUANTIZATION,
         "runtime": RUNTIME,
+        "runtime_version": RUNTIME_VERSION,
         "temperature": TEMPERATURE,
         "top_p": TOP_P,
         "max_new_tokens": MAX_NEW_TOKENS,

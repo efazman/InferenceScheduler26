@@ -96,6 +96,7 @@ def build_label(prompt_rec: dict, runs: list[dict], gen_cfg: dict, is_mock: bool
         "model": gen_cfg["model"],
         "quantization": gen_cfg["quantization"],
         "runtime": gen_cfg["runtime"],
+        "runtime_version": gen_cfg.get("runtime_version"),
         "temperature": gen_cfg["temperature"],
         "top_p": gen_cfg["top_p"],
         "max_new_tokens": gen_cfg["max_new_tokens"],

@@ -8,13 +8,15 @@ Every setting lives in `datagen/config.py`.
 | Model | Meta Llama 3.1 8B Instruct, GGUF **Q4_K_M** |
 | Runtime | llama.cpp `llama-server`, one slot (`-np 1`), so one generation at a time |
 | Hardware | RTX 3060 Ti 8 GB |
-| Decoding | temperature 0.7, top_p 0.9, max_new_tokens 512, fixed system prompt, seeds 42–45 |
+| Decoding | temperature 0.7, top_p 0.9, max_new_tokens 1024, fixed system prompt, seeds 42–45 |
 | Dataset | LMSYS-Chat-1M: English, single user turn, exact duplicates removed |
-| Subset | 500 prompts: 20% knowledge, 20% explanation, 15% each for coding, summarization, writing and troubleshooting |
+| Subset | **2,000 prompts**: 20% knowledge, 20% explanation, 15% each for coding, summarization, writing and troubleshooting |
 | Target | p90 of 4 output-token counts (linear interpolation, so x3 + 0.7·(x4 − x3)) |
+| Scale | 2,000 prompts × 4 generations = **8,000 generations** |
+| Checkpoints | Standalone training sets cut at 250 / 500 / 1000 / 2000 completed prompts |
 
 ```
-LMSYS parquet ──preprocess_lmsys──▶ clean_prompts.jsonl ──select_subset──▶ subset_500.jsonl
+LMSYS parquet ──preprocess_lmsys──▶ clean_prompts.jsonl ──select_subset──▶ subset_2000.jsonl
       ──generate_labels (llama-server ×4 seeds)──▶ labels.jsonl ──python -m ml.train --real──▶ predictor
 ```
 
@@ -31,10 +33,10 @@ hf download lmsys/lmsys-chat-1m --repo-type dataset --local-dir data/raw/lmsys-c
 ## 2. Preprocess and pick the subset (any machine)
 ```bash
 python -m datagen.preprocess_lmsys     # -> data/lmsys/clean_prompts.jsonl (+ .summary.json with drop counts)
-python -m datagen.select_subset        # -> data/lmsys/subset_500.jsonl (+ .summary.json with category counts)
+python -m datagen.select_subset        # -> data/lmsys/subset_2000.jsonl (+ .summary.json with category counts)
 ```
 Both steps stream their input and are deterministic, so the same input and seed give byte-identical
-output. Check `subset_500.summary.json`. If a category had too few prompts, its shortfall was
+output. Check `subset_2000.summary.json`. If a category had too few prompts, its shortfall was
 filled from the other categories, and the summary says so.
 
 Categories come from the ordered keyword rules in `datagen/categories.py` ("heuristic-v1").
@@ -70,7 +72,7 @@ llama.cpp/build/bin/llama-server -m models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.ggu
 #    normal assistant answer (proves the chat template is applied) and that finish_reason is "stop".
 python -m datagen.generate_labels --backend llamacpp --limit 3 --output-dir data/labels/smoke
 
-# f) the real run -> data/labels/llama31_8b_q4km/ (2,000 generations)
+# f) the real run -> data/labels/llama31_8b_q4km/ (8,000 generations)
 python -m datagen.generate_labels --backend llamacpp
 
 # g) train and evaluate on the real labels
@@ -99,3 +101,45 @@ because it would mix two label sets. Use a new `--output-dir` for a new configur
 
 `n_truncated_runs` counts runs that stopped at `max_new_tokens` (`finish_reason: "length"`).
 Those lengths are lower bounds, not true lengths.
+
+## Monitoring a long run
+`datagen.status` only reads, tolerates a half-written final line, and is safe to run at any time
+while generation is in flight:
+```bash
+python -m datagen.status          # progress, generations/min, ETA, truncation rate, failures
+```
+Throughput and ETA are derived from the timestamps in `runs.jsonl`, so they describe the whole
+run rather than the current session and survive restarts.
+
+## Incremental checkpoints
+`datagen.make_checkpoint` cuts standalone training datasets from an in-progress run, so the
+predictor can be trained and a learning curve measured before all 2,000 prompts finish:
+```bash
+python -m datagen.make_checkpoint --list     # what is ready / already cut, writes nothing
+python -m datagen.make_checkpoint            # cut every ready size in config.CHECKPOINT_SIZES
+```
+Checkpoints are **nested**: labels are ranked by position in the subset file, not by completion
+time, so `labels_250` ⊂ `labels_500` ⊂ `labels_1000` ⊂ `labels_2000` no matter how retries and
+resumes interleaved. That makes the 250 → 500 → 1000 → 2000 curve a measurement of dataset size
+alone. An existing checkpoint is **never overwritten** (`--force` overrides), and mock labels are
+refused.
+
+Each checkpoint is self-sufficient:
+```
+data/labels/llama31_8b_q4km/checkpoints/checkpoint_00500/
+    labels_500.jsonl           same schema as labels.jsonl
+    generation_config.json     copied from the source run
+    checkpoint.summary.json    category counts, target stats, truncation counts, sha256
+```
+Train on one with:
+```bash
+python -m ml.train --real --data data/labels/llama31_8b_q4km/checkpoints/checkpoint_00500/labels_500.jsonl \
+                   --output-dir artifacts/distilbert_llama31_cp500
+```
+
+## Provenance
+`generation_config.json` and every label record carry `runtime_version` (the exact llama.cpp
+build, e.g. `b11381-836d57176-win-cuda-12.4-x64`) alongside model, quantization, decoding settings and
+`system_prompt_sha256`. A resume whose `runtime_version` differs is refused, so one label set can
+never mix two runtimes. Override it with the `LLAMA_CPP_BUILD` environment variable when the
+binary changes.

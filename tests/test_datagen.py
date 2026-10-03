@@ -11,6 +11,8 @@ import pytest
 from datagen import config
 from datagen.backends import BackendError, MockBackend, OpenAICompatBackend
 from datagen.categories import CATEGORIES, assign_category
+from datagen import make_checkpoint
+from datagen import status as status_mod
 from datagen.generate_labels import ConfigMismatch, percentile_target, run_label_generation
 from datagen.jsonl import iter_jsonl, repair_jsonl_tail, write_jsonl
 from datagen.preprocess_lmsys import preprocess, prompt_id_for
@@ -378,7 +380,8 @@ def test_openai_compat_backend_request_and_parse(fake_server):
     assert res.server_timings["predicted_n"] == 52 and res.latency_ms > 0
     _, body = FakeLlamaServer.requests[-1]
     assert body["seed"] == 42 and body["temperature"] == 0.7 and body["top_p"] == 0.9
-    assert body["max_tokens"] == 512 and body["messages"][0] == {"role": "system", "content": config.SYSTEM_PROMPT}
+    assert body["max_tokens"] == config.MAX_NEW_TOKENS
+    assert body["messages"][0] == {"role": "system", "content": config.SYSTEM_PROMPT}
 
 
 def test_openai_compat_errors(fake_server):
@@ -412,3 +415,109 @@ def test_distilbert_counter_requires_tokenizer():
         make_token_counter("distilbert")
     with pytest.raises(ValueError):
         make_token_counter("nope")
+
+
+# --------------------------------------------------------------------------- checkpoints
+
+def _finished_run(tmp_path, n_prompts):
+    """Produce a real (non-mock) label run of n_prompts and return (labels_path, subset_path)."""
+    prompts = make_prompts(n_prompts)
+    subset = tmp_path / "subset.jsonl"
+    write_jsonl(prompts, subset)
+    out = tmp_path / "labels"
+    backend = MockBackend(config.MAX_NEW_TOKENS)
+    backend.name = "openai-compat"  # pretend it is the real backend so is_mock is False
+    run_label_generation(prompts, backend, out, **NO_SLEEP)
+    return out / config.LABELS_FILE, subset
+
+
+def test_checkpoints_are_nested_and_deterministic(tmp_path):
+    labels, subset = _finished_run(tmp_path, 12)
+    root = tmp_path / "cp"
+    rep = make_checkpoint.main(["--labels", str(labels), "--subset", str(subset),
+                                "--out-root", str(root), "--sizes", "4", "8", "12"])
+    assert set(rep["written"]) == {"4", "8", "12"}
+
+    def ids(n):
+        return [r["prompt_id"] for r in iter_jsonl(root / f"checkpoint_{n:05d}" / f"labels_{n}.jsonl")]
+
+    assert len(ids(4)) == 4 and len(ids(8)) == 8 and len(ids(12)) == 12
+    assert ids(4) == ids(8)[:4] == ids(12)[:4]          # nested
+    assert ids(12) == [p["prompt_id"] for p in make_prompts(12)]  # subset order, not completion order
+    summary = json.loads((root / "checkpoint_00008" / "checkpoint.summary.json").read_text())
+    assert summary["n_prompts"] == 8 and summary["target_field"] == config.TARGET_FIELD
+    assert (root / "checkpoint_00008" / config.GENERATION_CONFIG_FILE).exists()
+
+
+def test_checkpoint_nesting_survives_out_of_order_completion(tmp_path):
+    """Completion order must not change checkpoint contents."""
+    labels, subset = _finished_run(tmp_path, 8)
+    records = list(iter_jsonl(labels))
+    write_jsonl(list(reversed(records)), labels)  # simulate a resume that completed in another order
+    root = tmp_path / "cp"
+    make_checkpoint.main(["--labels", str(labels), "--subset", str(subset),
+                          "--out-root", str(root), "--sizes", "4"])
+    ids = [r["prompt_id"] for r in iter_jsonl(root / "checkpoint_00004" / "labels_4.jsonl")]
+    assert ids == [p["prompt_id"] for p in make_prompts(4)]
+
+
+def test_checkpoint_not_ready_and_never_overwritten(tmp_path, capsys):
+    labels, subset = _finished_run(tmp_path, 5)
+    root = tmp_path / "cp"
+    args = ["--labels", str(labels), "--subset", str(subset), "--out-root", str(root)]
+    rep = make_checkpoint.main(args + ["--sizes", "4", "10"])
+    assert "4" in rep["written"] and "not ready" in rep["skipped"]["10"]
+    before = (root / "checkpoint_00004" / "labels_4.jsonl").read_bytes()
+    rep = make_checkpoint.main(args + ["--sizes", "4"])            # second call
+    assert rep["skipped"]["4"] == "already exists"
+    assert (root / "checkpoint_00004" / "labels_4.jsonl").read_bytes() == before
+
+
+def test_checkpoint_refuses_mock_labels(tmp_path):
+    prompts = make_prompts(4)
+    subset = tmp_path / "subset.jsonl"
+    write_jsonl(prompts, subset)
+    out = tmp_path / "labels"
+    run_label_generation(prompts, MockBackend(config.MAX_NEW_TOKENS), out, **NO_SLEEP)
+    with pytest.raises(SystemExit):
+        make_checkpoint.main(["--labels", str(out / config.LABELS_FILE), "--subset", str(subset),
+                              "--out-root", str(tmp_path / "cp"), "--sizes", "4"])
+
+
+def test_checkpoint_output_loads_in_training_pipeline(tmp_path):
+    labels, subset = _finished_run(tmp_path, 10)
+    root = tmp_path / "cp"
+    make_checkpoint.main(["--labels", str(labels), "--subset", str(subset),
+                          "--out-root", str(root), "--sizes", "10"])
+    examples = load_jsonl(root / "checkpoint_00010" / "labels_10.jsonl", config.TARGET_FIELD)
+    assert len(examples) == 10
+    assert all(e["target_output_tokens"] > 0 and e["prompt"] and e["id"] for e in examples)
+
+
+def test_status_reports_progress_and_tolerates_partial_line(tmp_path):
+    prompts = make_prompts(6)
+    subset = tmp_path / "subset.jsonl"
+    write_jsonl(prompts, subset)
+    out = tmp_path / "labels"
+    backend = MockBackend(config.MAX_NEW_TOKENS)
+    backend.name = "openai-compat"
+    run_label_generation(prompts, backend, out, limit=4, **NO_SLEEP)
+
+    rep = status_mod.status(out, subset)
+    assert rep["prompts_complete"] == 4 and rep["prompts_total"] == 6
+    assert rep["generations_done"] == 16 and rep["generations_target"] == 24
+    assert rep["prompts_failed_permanently"] == 0
+    assert rep["generation_config"]["max_new_tokens"] == config.MAX_NEW_TOKENS
+    assert rep["generation_config"]["runtime_version"] == config.RUNTIME_VERSION
+
+    # A generation in flight leaves a partial final line; status must ignore it, not crash.
+    with (out / config.RUNS_FILE).open("a", encoding="utf-8") as f:
+        f.write('{"prompt_id": "p099", "seed": 42, "outp')
+    rep2 = status_mod.status(out, subset)
+    assert rep2["generations_done"] == 16
+
+
+def test_status_on_empty_dir(tmp_path):
+    rep = status_mod.status(tmp_path, tmp_path / "missing.jsonl")
+    assert rep["prompts_complete"] == 0 and rep["generations_done"] == 0
+    assert rep["eta_hours"] is None and rep["checkpoints_ready"] == []
