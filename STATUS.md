@@ -12,7 +12,7 @@ Base run is in flight and untouched. The censored-output extension pass, final-l
 the Phase 12 experiment harness are built and tested, and all wait on the base run finishing — see
 *Censored-output handling* and *Phase 12 harness* below.
 
-Project context: `General Project Context/adaptive_llm_scheduler_project_context.md`.
+Project context: `docs/PROJECT_CONTEXT.md`.
 Pipeline docs: `datagen/README.md`, `ml/README.md`. The scheduler itself is not started yet, by design.
 
 ## Phase status

@@ -110,8 +110,12 @@ structural — at concurrency 1 with no preemption, promoting one overdue long r
 short request behind it for that request's full service time, and service times are heavy-tailed
 here (p50 output 407 tokens, p90 918). Bounded waiting has a real, measurable price.
 
-Full numbers and validation tables: [`docs/REAL_RESULTS.md`](docs/REAL_RESULTS.md) ·
+Full numbers, validation tables and the raw event streams:
+**[`docs/measurements/`](docs/measurements/)** · [`docs/REAL_RESULTS.md`](docs/REAL_RESULTS.md) ·
 [`STATUS.md`](STATUS.md)
+
+Every measurement is committed to this repository, so the results stand on their own without the
+Tiger Cloud instance, the local run directory, or the machine that produced them.
 
 ---
 
@@ -160,7 +164,8 @@ head-of-line blocking, so the label is deliberately conservative.
 | [`ui/`](ui/) | Next.js dashboard — queue reordering, execution timeline, live metrics, run comparison |
 | [`tests/`](tests/) | 186 tests across ML, data generation and scheduling |
 | [`scripts/`](scripts/) | Server launch, resumable generation driver, experiment runners |
-| [`docs/`](docs/) | Runbook, demo flow, simulated and real results, design notes, research papers |
+| [`docs/`](docs/) | Runbook, demo flow, design notes, research papers |
+| [`docs/measurements/`](docs/measurements/) | **Archived real measurements** — every event stream and summary, committed |
 
 ---
 
@@ -211,6 +216,45 @@ nested so the larger run remains available.
 
 **Throughput is reported as a sanity check only.** At K=1 without preemption, reordering cannot
 improve it, and a change would have signalled a stall or failure rather than a win.
+
+---
+
+## Research basis
+
+Two papers shaped the design. What was taken from each, and what was not:
+
+**Zheng et al. (2023)** established that response length can be perceived before generation and
+used to schedule, and that repeated generations give a conservative target. This project takes the
+core premise, the p90-over-repeats labelling, and the principle that underprediction is more
+harmful than overprediction. It does **not** use their LLM-as-its-own-predictor approach — a
+separate small model keeps predictor cost off the serving GPU and measurable in isolation.
+
+**Xie et al. (2026)** frame output-length prediction as a heavy-tailed problem better served by a
+distribution over length bins than a point estimate, with soft labels preserving distance between
+neighbouring bins. This project takes the 20-quantile-bin head, the soft labels, the reconstruction
+of expected length from bin probabilities, and MAE as the primary metric. It does **not** implement
+their EGTP hidden-state pooling: that requires hooks into the serving model's internals, which
+would have coupled the predictor to llama.cpp and made the overhead much harder to attribute.
+A DistilBERT auxiliary model was chosen instead for isolation and debuggability.
+
+### References
+
+> Zheng, Z., Ren, X., Xue, F., Luo, Y., Jiang, X., and You, Y. (2023).
+> *Response Length Perception and Sequence Scheduling: An LLM-Empowered LLM Inference Pipeline.*
+> National University of Singapore; Noah's Ark Lab, Huawei.
+> Code: <https://github.com/zhengzangw/Sequence-Scheduling> ·
+> local copy: [`docs/research/Zheng23.pdf`](docs/research/Zheng23.pdf)
+
+> Xie, H., Chen, Y., Wang, L., Hu, L., and Wang, D. (2026).
+> *Predicting LLM Output Length via Entropy-Guided Representations.*
+> Published as a conference paper at **ICLR 2026**.
+> King Abdullah University of Science and Technology (KAUST); PRADA Lab;
+> Mohamed bin Zayed University of Artificial Intelligence (MBZUAI).
+> Local copy: [`docs/research/EGTP.pdf`](docs/research/EGTP.pdf)
+
+Dataset: **LMSYS-Chat-1M** (Zheng et al., 2023), used under its terms —
+<https://huggingface.co/datasets/lmsys/lmsys-chat-1m>. No prompt text from it is redistributed in
+this repository.
 
 ---
 
