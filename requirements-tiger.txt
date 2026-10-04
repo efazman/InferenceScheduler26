@@ -1,0 +1,2 @@
+# Optional: Tiger Data (PostgreSQL / TimescaleDB) event sink. Not needed for simulation or local runs.
+psycopg[binary]>=3.1

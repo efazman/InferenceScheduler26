@@ -11,3 +11,10 @@ logs/
 data/lmsys/
 data/labels/
 build/
+scheduler_runs/
+data/scheduler/
+
+# credentials: never commit (Tiger Cloud connection files, local env files)
+*.env
+.env*
+tiger-cloud-*credentials*

@@ -1,0 +1,31 @@
+{
+  "workloads": [
+    {
+      "name": "mostly_short",
+      "description": "80% short / 20% long requests, Poisson arrivals",
+      "n": 30
+    },
+    {
+      "name": "balanced",
+      "description": "50% short / 50% long requests, Poisson arrivals",
+      "n": 30
+    },
+    {
+      "name": "mostly_long",
+      "description": "20% short / 80% long requests, Poisson arrivals",
+      "n": 30
+    },
+    {
+      "name": "head_of_line",
+      "description": "a long job is running; another long request queues first, short ones arrive behind it",
+      "n": 10
+    },
+    {
+      "name": "bursty",
+      "description": "mixed background traffic, then a burst of short requests within one second",
+      "n": 40
+    }
+  ],
+  "max_wait_ms": 15000.0,
+  "warning": "SIMULATED: synthetic workloads, mock predictor, mock backend (service = base overhead + tokens x ms/token). Validates policy behaviour only; not a measurement of Llama or of the predictor."
+}
