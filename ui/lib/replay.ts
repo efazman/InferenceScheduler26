@@ -14,8 +14,13 @@ export function sizeOf(r: Pick<ReqView, "sizeClass" | "predicted" | "actual">): 
   return tokens >= LONG_TOKEN_THRESHOLD ? "long" : "short";
 }
 
-/** Rebuild scheduler state at time t by applying every event with timestamp <= t. */
-export function replay(events: SchedEvent[], t: number): ReplayState {
+/** Rebuild scheduler state at time t by applying every event with timestamp <= t.
+ *
+ * The queue order comes from the engine's latest queue_snapshot. For the adaptive policy the
+ * order also depends on the clock (requests become overdue while a job runs, with no event), so
+ * when `adaptiveMaxWaitMs` is given the documented promotion rule is re-applied at t: overdue
+ * requests first, oldest arrival first; everything else keeps the engine's (SEJF) order. */
+export function replay(events: SchedEvent[], t: number, adaptiveMaxWaitMs?: number): ReplayState {
   const reqs = new Map<string, ReqView>();
   const completed: ReqView[] = [];
   const failed: ReqView[] = [];
@@ -70,6 +75,12 @@ export function replay(events: SchedEvent[], t: number): ReplayState {
     (a, b) => (a.enqueue ?? 0) - (b.enqueue ?? 0),
   )) {
     queue.push(r);
+  }
+  if (adaptiveMaxWaitMs != null) {
+    const overdue = queue.filter((r) => t - r.arrival >= adaptiveMaxWaitMs)
+      .sort((a, b) => a.arrival - b.arrival || (a.enqueue ?? 0) - (b.enqueue ?? 0) || a.id.localeCompare(b.id));
+    const rest = queue.filter((r) => t - r.arrival < adaptiveMaxWaitMs);
+    queue.splice(0, queue.length, ...overdue, ...rest);
   }
   return { now: t, running: running ? reqs.get(running) ?? null : null, queue, completed, failed, arrived: reqs.size };
 }

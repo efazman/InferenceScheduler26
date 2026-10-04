@@ -80,7 +80,8 @@ function firstArrival(events: SchedEvent[]): number {
 
 /** Shared detail view for one policy run at time t. */
 function Detail({ run, t, maxWaitMs }: { run: PolicyRun; t: number; maxWaitMs: number }) {
-  const state = useMemo(() => replay(run.events, t), [run.events, t]);
+  const state = useMemo(() => replay(run.events, t, run.policy === "adaptive" ? maxWaitMs : undefined),
+    [run.events, run.policy, t, maxWaitMs]);
   const m = liveMetrics(state, firstArrival(run.events), maxWaitMs);
   return (
     <>
@@ -162,7 +163,8 @@ function SimulationView() {
       <section className="card">
         <h3>Same requests, same moment, three policies <span className="muted small">running request, then the queue in the order each policy would serve it. Width = predicted tokens</span></h3>
         {runs.map((r) => (
-          <QueueStrip key={r.policy} policy={r.policy} state={replay(r.events, pb.t)} maxWaitMs={maxWaitMs}
+          <QueueStrip key={r.policy} policy={r.policy}
+                      state={replay(r.events, pb.t, r.policy === "adaptive" ? maxWaitMs : undefined)} maxWaitMs={maxWaitMs}
                       maxTokens={maxTok} selected={r.policy === policy} onSelect={() => setPolicy(r.policy)} />
         ))}
         <div className="legend small">
@@ -267,7 +269,7 @@ function RecordedView() {
       {!(live && follow) && <Controls pb={pb} tEnd={tEnd} label="recorded" />}
       <section className="card">
         <h3>Queue right now</h3>
-        <QueueStrip policy={policy} state={replay(events, t)} maxWaitMs={maxWaitMs} maxTokens={maxPredicted(events)} selected />
+        <QueueStrip policy={policy} state={replay(events, t, policy === "adaptive" ? maxWaitMs : undefined)} maxWaitMs={maxWaitMs} maxTokens={maxPredicted(events)} selected />
       </section>
       <section className="card">
         <h3>Execution order over time</h3>
@@ -283,6 +285,9 @@ function RecordedView() {
 
 export default function Page() {
   const [mode, setMode] = useState<"sim" | "runs">("sim");
+  useEffect(() => { // deep link: ?mode=runs opens the recorded / live view
+    if (new URLSearchParams(window.location.search).get("mode") === "runs") setMode("runs");
+  }, []);
   return (
     <main>
       <header className="top">

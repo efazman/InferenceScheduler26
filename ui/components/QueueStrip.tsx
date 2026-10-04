@@ -9,7 +9,7 @@ function Block({ r, now, maxWaitMs, maxTokens, running }: {
 }) {
   const size = sizeOf(r);
   const tokens = r.predicted ?? 0;
-  const width = Math.max(56, Math.min(180, (tokens / Math.max(maxTokens, 1)) * 180));
+  const width = Math.max(64, Math.min(180, (tokens / Math.max(maxTokens, 1)) * 180));
   const waited = (running ? (r.start ?? now) : now) - r.arrival;
   const overdue = !running && waited >= maxWaitMs;
   return (
