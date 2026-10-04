@@ -55,7 +55,7 @@ policies behave, not how fast the real system is.
   one setting, the maximum wait before a request jumps the queue.
 - **Reordering never changes throughput.** It only changes *who* waits.
 
-## The finding that needs a decision
+## The fairness setting (now decided)
 
 The adaptive policy's maximum-wait setting defaults to **15 seconds**. That only works when the
 system is lightly loaded:
@@ -66,13 +66,9 @@ system is lightly loaded:
 | Busy (85%) | Barely better than FIFO, because almost everyone waits over 15 s and counts as overdue | **At 60–120 s:** close to SEJF's speed, with the longest wait still capped |
 | Very busy (95%) | Behaves just like FIFO | **At 120 s:** recovers much of SEJF's speed (21.8 s average, against 41.4 s for FIFO and 15.9 s for SEJF) |
 
-**Decision needed:** how to set the maximum wait for the real demo.
-
-| Option | Pros | Cons |
-| --- | --- | --- |
-| Keep 15 s and run the demo at moderate load | No work | The adaptive policy looks no better than FIFO at higher load |
-| **Set it from the real model's measured answer times** (recommended) | Grounded in real data that already exists from the label run | Roughly an hour of work after the merge (estimate) |
-| Test several settings on the real system | Most convincing evidence | Costs GPU time during the busiest phase |
+**Decided:** for real runs, the maximum wait is **3 × the measured median answer time** of the
+real model, taken from the label run's existing measurements. The scheduler records the value it
+used, and the dashboard shows it. Other multipliers (2×, 5×) can be tried later.
 
 ## Blockers
 
@@ -80,7 +76,7 @@ system is lightly loaded:
 | --- | --- | --- |
 | The GPU machine is busy with the label run | Real-model runs, and the merge itself | The label run and predictor training finishing |
 | No Tiger Data credentials | Storing results in the analytics database | A team member creates the database and shares the connection details |
-| The branch isn't on GitHub yet | The GPU machine pulling this work | Push the branch (one command, waiting on approval) |
+| The branch needs merging on the GPU machine | Real-model runs | The label run finishing; steps are in docs/MERGE_PLAN.md |
 
 ## Next steps once the GPU machine is free
 

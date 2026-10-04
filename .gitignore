@@ -12,3 +12,4 @@ data/lmsys/
 data/labels/
 build/
 scheduler_runs/
+data/scheduler/

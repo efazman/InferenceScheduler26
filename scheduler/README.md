@@ -21,7 +21,9 @@ prompt ──▶ Predictor ──▶ queue ──▶ SchedulerPolicy ──▶ I
 | `metrics.py` | Percentiles, queue wait, throughput, starvation count, short/long split. |
 | `workloads.py` | Five seeded synthetic workloads, plus `workload_from_prompts` for real prompts. |
 | `simulator.py` | Engine + `VirtualClock` + mock predictor/backend. Service = 60 ms + 13.3 ms/token. |
-| `__main__.py` | CLI: `simulate`, `compare`, `sweep`, `export-ui`, `prompts-from-split`, `run`. |
+| `manifest.py` | Experiment manifest: the fixed arrival trace (requests, prompts, arrivals, seeds) every policy replays. |
+| `max_wait.py` | Explicit or derived (multiplier × median service time) adaptive threshold. |
+| `__main__.py` | CLI: `simulate`, `compare`, `sweep`, `export-ui`, `prompts-from-split`, `make-manifest`, `measure-service`, `run`, `report`. |
 | `../ui/` | Next.js dashboard (see `ui/README.md`). |
 
 ## The three policies
@@ -34,8 +36,13 @@ At every decision point (the backend is idle and the queue isn't empty), with `w
 | SEJF | Lowest `(predicted_tokens, enqueue_time, request_id)` |
 | **Adaptive** | If any request has `wait ≥ MAX_WAIT`: the **oldest** of those (`arrival_time, enqueue_time, request_id`). Otherwise the same as SEJF. |
 
-`MAX_WAIT` defaults to 15 s (`scheduler/config.py: DEFAULT_MAX_WAIT_MS`). Override it with
-`--max-wait-ms` on every CLI command.
+Where `MAX_WAIT` comes from:
+- **Simulation and controlled experiments** use an explicit static value: 15 s by default
+  (`DEFAULT_MAX_WAIT_MS`), or `--max-wait-ms`.
+- **Real runs** use `MAX_WAIT = multiplier × measured median service time`, with the multiplier
+  defaulting to 3.0 (`DEFAULT_MAX_WAIT_MULTIPLIER`). Pass `--median-service-from <runs.jsonl>` or
+  `--median-service-ms`. A real llama.cpp run refuses to start without one of these, and the
+  resolved value and its source are recorded in the run and shown in the dashboard.
 
 The guarantee: once a request is overdue, only the job already running and requests that became
 overdue before it can still delay it. New short traffic can't. That's a bound on starvation, not
@@ -83,62 +90,19 @@ The workloads are `mostly_short` (80/20), `balanced` (50/50), `mostly_long` (20/
 from `--load` (default 0.95). Their lengths are synthetic, and every output is labelled
 SIMULATED or MOCK.
 
-## Integration with the RTX 3060 Ti branch
+## Real experiment and merge
 
-**Do not run any of this while label generation is still live** (STATUS.md, "nothing heavy on
-this box").
+- **Runbook**, from finished labels to the recorded demo, with exact commands:
+  [`docs/RUNBOOK_REAL_EXPERIMENT.md`](../docs/RUNBOOK_REAL_EXPERIMENT.md)
+- **Merge plan**, covering file ownership, conflict notes and GPU-machine commands:
+  [`docs/MERGE_PLAN.md`](../docs/MERGE_PLAN.md)
 
-1. **Merge.** On the 3060 Ti machine, once generation and training are done:
-   ```powershell
-   git fetch origin
-   git checkout master; git pull
-   git merge --no-ff origin/feature/scheduler-ui-parallel
-   .\.venv\Scripts\python.exe -m pytest
-   ```
-   This branch adds only new files, apart from `.gitignore` (two appended lines). See
-   *Expected conflicts*.
-2. **Plug in the winning predictor.** Nothing changes in code. Pass a spec:
-   `--predictor distilbert:artifacts\<winning run dir>` or `--predictor baseline:artifacts\<dir>`,
-   using the directory `ml.compare_runs` picked. The baseline's prompt-token counter is read from
-   its `baseline.json`. A `llamacpp:` counter needs llama-server up, which it will be.
-3. **Point at llama-server.** Use the server STATUS.md already uses: `-c 4096 -ngl 99 -np 1`,
-   where one slot means our queue order is the execution order. `LlamaCppBackend` reads
-   `LLM_BACKEND_URL` (default `http://127.0.0.1:8080`), or pass `--url`. Decoding settings come
-   from `datagen/config.py`, so real runs generate exactly the way the labels were produced.
-4. **Build a real workload from held-out prompts**, so the predictor is never scored on prompts it
-   trained on:
-   ```powershell
-   .\.venv\Scripts\python.exe -m scheduler prompts-from-split --artifacts artifacts\<winner> `
-       --split test --out data\scheduler\test_prompts.jsonl
-   ```
-5. **Run every policy on the same prompts and arrival schedule.** Same `--seed`, so arrival times
-   and per-request generation seeds match:
-   ```powershell
-   foreach ($p in "fifo","sejf","adaptive") {
-     .\.venv\Scripts\python.exe -m scheduler run --backend llamacpp --predictor distilbert:artifacts\<winner> `
-       --prompts-file data\scheduler\test_prompts.jsonl --policy $p --mean-interarrival-ms 7000 `
-       --run-name real-$p
-   }
-   ```
-   Pick `--mean-interarrival-ms` for the load you want: mean service time ÷ load. Mean service
-   time is about 6 s at the 1024 cap (STATUS.md), so 7000 ms gives roughly 0.85 load. Set
-   `--max-wait-ms` from `docs/SIM_RESULTS.md`. Each run writes
-   `scheduler_runs/real-<policy>/{events.jsonl, summary.json}`, fsynced per event.
-6. **Connect Tiger Data.** Implement `TigerDataEventSink` in `scheduler/events.py` (the planned
-   schema is in its docstring; credentials come from `TIGER_DATA_DSN`), then in `cmd_run` wrap the
-   sink as `FanoutSink(LocalJsonlEventSink(...), TigerDataEventSink())`. The local JSONL stays the
-   source of truth, and a database outage can't break a run.
-7. **Demo.** Run `cd ui && npm run dev`. The *Simulation* tab shows the reordering story on
-   synthetic workloads. The *Recorded / live runs* tab shows the real runs from step 5 (live while
-   they execute, if started during the demo). For a real-data side-by-side, use
-   `python -m scheduler compare`-style tables built from the three `summary.json` files.
+The real-experiment pieces:
 
-## Expected merge conflicts
-
-- `.gitignore`: this branch appends `scheduler_runs/`. If master also appended lines, keep both.
-- Nothing else. This branch doesn't touch `ml/`, `datagen/`, `scripts/`, `STATUS.md`,
-  `ORCHESTRATOR_UPDATE.md`, `requirements.txt` or any data or artifact directory. It only
-  *imports* `datagen.backends`, `datagen.config` and `ml.*`. If master renames
-  `OpenAICompatBackend`, `LengthPredictor.load` or `PromptLengthBaseline.load`, the adapters in
-  `scheduler/backends.py` and `scheduler/predictors.py` are the only places to update, and their
-  tests (`test_llamacpp_*`, `test_real_predictor_adapters_*`) will catch it.
+| Piece | Where |
+| --- | --- |
+| Fixed arrival trace that every policy replays (`make-manifest`, `run --manifest`) | `scheduler/manifest.py` |
+| `MAX_WAIT = 3.0 x median service time` (`measure-service`, `run --median-service-from`) | `scheduler/max_wait.py` |
+| Like-for-like comparison and checks (`report`) | `scheduler/__main__.py` |
+| Held-out prompts from a trained predictor (`prompts-from-split`) | `scheduler/__main__.py` |
+| Tiger Data table and row mapping (`tiger_row`); sink still a placeholder | `scheduler/tigerdata_schema.sql`, `scheduler/events.py` |

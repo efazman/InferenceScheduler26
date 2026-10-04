@@ -53,16 +53,12 @@ Full tables: [n = 60](sim_results_n60.md) · [n = 1000](sim_results_n1000.md) ·
 5. **"Starved" counts can mislead on their own.** SEJF often has fewer requests over the threshold
    than FIFO while starving a few far worse. Read the count together with max wait and p99.
 
-## What this means for the real run (decision needed)
+## What this means for the real run (decided)
 
-The 15 s default fits light load only. The right threshold depends on the real service-time
-distribution and arrival rate, and neither has been measured for the scheduler yet. Options, none
-implemented:
-
-- keep 15 s and run the real demo at moderate load;
-- choose the threshold from measured data (e.g. a multiple of the median Llama service time, which
-  is already in the label run's `runs.jsonl`); or
-- sweep it on the real backend with `python -m scheduler run`.
+A fixed 15 s threshold only fits light load, so real runs don't use it. **Decision: MAX_WAIT =
+3.0 × the measured median Llama service time**, taken from the label run's own `runs.jsonl`
+(`python -m scheduler measure-service`). 2× and 5× may be tried later. The simulator keeps static
+thresholds for controlled experiments.
 
 ## Caveats
 
