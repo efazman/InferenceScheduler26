@@ -61,12 +61,13 @@ export function QueueTable({ state, maxWaitMs }: { state: ReplayState; maxWaitMs
 }
 
 export function MetricCards({ m, starvationMs }: { m: LiveMetrics; starvationMs: number }) {
+  // Latency and fairness are the point of K=1 scheduling; throughput is only a sanity check.
   const cards: [string, string, string?][] = [
+    ["Mean latency", fmtSec(m.meanLatency)],
     ["p50 latency", fmtSec(m.p50)],
     ["p95 latency", fmtSec(m.p95)],
-    ["Mean latency", fmtSec(m.meanLatency)],
-    ["Throughput", m.throughputPerMin == null ? "–" : `${m.throughputPerMin.toFixed(1)}/min`],
-    ["Max wait", fmtSec(m.maxWait), `${m.starved} over ${starvationMs / 1000}s`],
+    ["Short-request latency", fmtSec(m.shortMean)],
+    ["Max wait", fmtSec(m.maxWait), `${m.starved} over ${(starvationMs / 1000).toFixed(1)}s`],
   ];
   return (
     <div className="metrics">
@@ -77,7 +78,9 @@ export function MetricCards({ m, starvationMs }: { m: LiveMetrics; starvationMs:
           {sub && <div className="metric-sub">{sub}</div>}
         </div>
       ))}
-      <div className="metric-note muted small">{m.completed} completed so far</div>
+      <div className="metric-note muted small">
+        {m.completed} completed so far · throughput (sanity check) {m.throughputPerMin == null ? "–" : `${m.throughputPerMin.toFixed(1)}/min`}
+      </div>
     </div>
   );
 }
@@ -120,11 +123,11 @@ const SUMMARY_ROWS: [string, keyof RunSummary, "min" | "max", (v: number) => str
   ["p95 latency", "p95_latency_ms", "min", (v) => fmtSec(v)],
   ["Mean queue wait", "mean_queue_wait_ms", "min", (v) => fmtSec(v)],
   ["Max queue wait", "max_queue_wait_ms", "min", (v) => fmtSec(v)],
-  ["Throughput", "throughput_rps", "max", (v) => `${(v * 60).toFixed(1)}/min`],
   ["Short-request latency", "short_mean_latency_ms", "min", (v) => fmtSec(v)],
   ["Long-request latency", "long_mean_latency_ms", "min", (v) => fmtSec(v)],
   ["Long-request max wait", "long_max_queue_wait_ms", "min", (v) => fmtSec(v)],
   ["Starved", "starvation_count", "min", (v) => `${v}`],
+  ["Throughput (sanity check)", "throughput_rps", "max", (v) => `${(v * 60).toFixed(1)}/min`],
 ];
 
 export function SummaryTable({ summaries }: { summaries: Record<string, RunSummary> }) {
@@ -139,7 +142,8 @@ export function SummaryTable({ summaries }: { summaries: Record<string, RunSumma
           const vals = policies.map((p) => summaries[p][key] as number | null);
           const nums = vals.filter((v): v is number => v != null);
           const best = nums.length ? (better === "min" ? Math.min(...nums) : Math.max(...nums)) : null;
-          const tie = nums.every((v) => Math.abs(v - (best ?? v)) < 1e-9);
+          // Throughput is a sanity check (it should not change under K=1 reordering): never crown a winner.
+          const tie = key === "throughput_rps" || nums.every((v) => Math.abs(v - (best ?? v)) <= 1e-6 * Math.max(1, Math.abs(v)));
           return (
             <tr key={key as string}>
               <td>{label}</td>

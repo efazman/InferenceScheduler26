@@ -194,24 +194,18 @@ function SimulationView() {
   );
 }
 
-function RecordedView() {
-  const [runsDir, setRunsDir] = useState("");
-  const [list, setList] = useState<RecordedRunInfo[]>([]);
-  const [name, setName] = useState<string | null>(null);
-  const [data, setData] = useState<{ events: SchedEvent[]; summary: RunSummary | null; complete: boolean } | null>(null);
-  const [follow, setFollow] = useState(true);
+function MeasurementBadge({ kind }: { kind: string | null | undefined }) {
+  if (kind === "real") return <span className="badge real">REAL measurement · llama.cpp</span>;
+  if (kind === "mock") return <span className="badge mockb">MOCK backend · not a measurement</span>;
+  return null;
+}
 
+type RunData = { events: SchedEvent[]; summary: RunSummary | null; complete: boolean };
+
+function useRunData(name: string | null): RunData | null {
+  const [data, setData] = useState<RunData | null>(null);
   useEffect(() => {
-    const load = () => fetch("/api/runs").then((r) => r.json()).then((j) => {
-      setRunsDir(j.runs_dir);
-      setList(j.runs);
-      setName((n) => n ?? j.runs[0]?.name ?? null);
-    });
-    load();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
-  }, []);
-  useEffect(() => {
+    setData(null);
     if (!name) return;
     let stop = false;
     const load = () => fetch(`/api/runs/${name}`).then((r) => r.json()).then((j) => {
@@ -222,11 +216,66 @@ function RecordedView() {
     load();
     return () => { stop = true; };
   }, [name]);
+  return data;
+}
+
+/** Completed runs of the same manifest under different policies: the real-data version of the
+ * simulation's side-by-side view. Same requests, same arrival times; only the policy differs. */
+function ManifestComparison({ runs, maxWaitMs }: { runs: RecordedRunInfo[]; maxWaitMs: number }) {
+  const [loaded, setLoaded] = useState<Record<string, SchedEvent[]>>({});
+  useEffect(() => {
+    let stop = false;
+    Promise.all(runs.map((r) => fetch(`/api/runs/${r.name}`).then((x) => x.json()).then((j) => [r.name, j.events] as const)))
+      .then((pairs) => { if (!stop) setLoaded(Object.fromEntries(pairs)); });
+    return () => { stop = true; };
+  }, [runs.map((r) => r.name).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ordered = [...runs].sort((a, b) => POLICIES.indexOf(a.policy as any) - POLICIES.indexOf(b.policy as any));
+  const ready = ordered.every((r) => loaded[r.name]);
+  const tEnd = ready ? Math.max(...ordered.map((r) => runEnd(loaded[r.name]))) : 0;
+  const pb = usePlayback(tEnd, 5);
+  if (!ready) return <p className="muted">Loading runs of this manifest…</p>;
+  const maxTok = Math.max(...ordered.map((r) => maxPredicted(loaded[r.name])));
+  const summaries = Object.fromEntries(ordered.filter((r) => r.summary).map((r) => [r.policy!, r.summary!]));
+  return (
+    <section className="card">
+      <h3>Same manifest, {ordered.length} policies <MeasurementBadge kind={ordered[0].measurement} />
+        <span className="muted small">manifest {ordered[0].manifest_id} · identical requests and arrival times</span></h3>
+      <Controls pb={pb} tEnd={tEnd} label={ordered[0].measurement === "real" ? "measured" : "mock"} />
+      {ordered.map((r) => (
+        <QueueStrip key={r.name} policy={r.policy ?? "?"} maxWaitMs={maxWaitMs} maxTokens={maxTok}
+                    state={replay(loaded[r.name], pb.t, r.policy === "adaptive" ? maxWaitMs : undefined)} />
+      ))}
+      <Timeline rows={ordered.map((r) => ({ policy: r.policy ?? "?", intervals: intervals(loaded[r.name]) }))}
+                tEnd={tEnd} t={pb.t} />
+      <SummaryTable summaries={summaries} />
+    </section>
+  );
+}
+
+function RecordedView() {
+  const [runsDir, setRunsDir] = useState("");
+  const [list, setList] = useState<RecordedRunInfo[]>([]);
+  const [name, setName] = useState<string | null>(null);
+  const [follow, setFollow] = useState(true);
+
+  useEffect(() => {
+    const load = () => fetch("/api/runs").then((r) => r.json()).then((j) => {
+      setRunsDir(j.runs_dir);
+      setList(j.runs);
+      const wanted = new URLSearchParams(window.location.search).get("run"); // deep link: ?mode=runs&run=<name>
+      setName((n) => n ?? (j.runs.some((r: RecordedRunInfo) => r.name === wanted) ? wanted : j.runs[0]?.name) ?? null);
+    });
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
+  }, []);
+  const data = useRunData(name);
 
   const events = data?.events ?? [];
   const tEnd = runEnd(events);
   const pb = usePlayback(tEnd, 1);
-  const startWall = (events.find((e) => e.event_type === "run_started") as any)?.wall_time;
+  const started = events.find((e) => e.event_type === "run_started") as any;
+  const startWall = started?.wall_time;
   const [, force] = useState(0);
   useEffect(() => { // live mode: advance the clock with wall time so waits keep growing between events
     if (!data || data.complete || !follow) return;
@@ -241,15 +290,18 @@ function RecordedView() {
         <h3>No recorded runs yet</h3>
         <p>Runs are read from <code>{runsDir || "scheduler_runs/"}</code>. Create one from the repo root:</p>
         <pre>python -m scheduler run --backend mock --workload head_of_line --n 60 --policy adaptive --speedup 5</pre>
-        <p className="muted">Later on the RTX 3060 Ti: <code>--backend llamacpp --predictor distilbert:&lt;artifacts&gt; --prompts-file &lt;prompts.jsonl&gt;</code></p>
+        <p className="muted">Real runs on the RTX 3060 Ti: see docs/RUNBOOK_REAL_EXPERIMENT.md.</p>
       </div>
     );
   const live = data != null && !data.complete;
   const t = live && follow && startWall ? Math.max(tEnd, Date.now() - Date.parse(startWall)) : pb.t;
-  const maxWaitMs = (events.find((e) => e.event_type === "run_started")?.data?.policy?.max_wait_ms as number) ??
+  const maxWaitMs = (started?.data?.policy?.max_wait_ms as number) ?? started?.data?.starvation_threshold_ms ??
     data?.summary?.starvation_threshold_ms ?? 15000;
   const policy = info?.policy ?? events[0]?.scheduler_policy ?? "?";
   const run: PolicyRun = { policy, events, summary: data?.summary ?? null };
+  const siblings = info?.manifest_id
+    ? list.filter((r) => r.complete && r.manifest_id === info.manifest_id) : [];
+  const comparable = siblings.length >= 2 && new Set(siblings.map((r) => r.policy)).size === siblings.length;
 
   return (
     <>
@@ -261,12 +313,16 @@ function RecordedView() {
             {list.map((r) => <option key={r.name} value={r.name}>{r.name}{r.complete ? "" : " (live)"}</option>)}
           </select>
         </label>
-        <span className="muted small">policy {POLICY_LABEL[policy] ?? policy} · backend {info?.backend} · predictor {info?.predictor}</span>
+        <MeasurementBadge kind={info?.measurement} />
+        <span className="muted small">policy {POLICY_LABEL[policy] ?? policy} · predictor {info?.predictor}
+          {info?.max_wait ? ` · adaptive max wait ${info.max_wait}` : ""}</span>
         <span className="spacer" />
         {live && <label className="small"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow live</label>}
         {live && <span className="badge live">live</span>}
       </div>
-      {!(live && follow) && <Controls pb={pb} tEnd={tEnd} label="recorded" />}
+      {comparable && <ManifestComparison runs={siblings} maxWaitMs={maxWaitMs} />}
+      <div className="toolbar"><h2>This run</h2></div>
+      {!(live && follow) && <Controls pb={pb} tEnd={tEnd} label={info?.measurement === "real" ? "measured" : "recorded"} />}
       <section className="card">
         <h3>Queue right now</h3>
         <QueueStrip policy={policy} state={replay(events, t, policy === "adaptive" ? maxWaitMs : undefined)} maxWaitMs={maxWaitMs} maxTokens={maxPredicted(events)} selected />

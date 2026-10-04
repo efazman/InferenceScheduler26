@@ -102,11 +102,13 @@ export interface LiveMetrics {
   throughputPerMin: number | null;
   maxWait: number | null; // includes requests still waiting right now
   starved: number;
+  shortMean: number | null;
 }
 
 /** Metrics over what has happened by state.now (same definitions as scheduler/metrics.py). */
 export function liveMetrics(s: ReplayState, firstArrival: number, starvationMs: number): LiveMetrics {
   const lat = s.completed.map((r) => (r.end ?? 0) - r.arrival);
+  const shortLat = s.completed.filter((r) => sizeOf(r) === "short").map((r) => (r.end ?? 0) - r.arrival);
   const started = [...s.completed, ...(s.running ? [s.running] : [])].map((r) => (r.start ?? 0) - r.arrival);
   const waiting = s.queue.map((r) => s.now - r.arrival);
   const waits = [...started, ...waiting];
@@ -119,6 +121,7 @@ export function liveMetrics(s: ReplayState, firstArrival: number, starvationMs: 
     throughputPerMin: elapsedMin > 0 ? s.completed.length / elapsedMin : null,
     maxWait: waits.length ? Math.max(...waits) : null,
     starved: waits.filter((w) => w > starvationMs).length,
+    shortMean: shortLat.length ? shortLat.reduce((a, b) => a + b, 0) / shortLat.length : null,
   };
 }
 

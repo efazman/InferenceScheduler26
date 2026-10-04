@@ -132,6 +132,8 @@ select, .btn, .seg button {
 .badge.short { color: var(--short); border-color: var(--short); }
 .badge.long { color: var(--long); border-color: var(--long); }
 .badge.overdue, .badge.live { color: var(--overdue); border-color: var(--overdue); }
+.badge.real { color: var(--short); border-color: var(--short); font-weight: 700; }
+.badge.mockb { color: var(--long); border-color: var(--long); font-weight: 700; }
 
 .running { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
 .running-id { font: 700 18px ui-monospace, Menlo, monospace; }

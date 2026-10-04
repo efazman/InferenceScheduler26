@@ -65,6 +65,10 @@ export interface RecordedRunInfo {
   workload: string | null;
   complete: boolean;
   warning: string | null;
+  manifest_id: string | null; // runs with the same manifest replayed the same arrival trace
+  measurement: "real" | "mock" | null;
+  max_wait: string | null; // e.g. "18.1 s = 3 x median service 6.04 s (runs.jsonl, n=2000)"
+  summary: RunSummary | null;
 }
 
 export type ReqState = "arriving" | "queued" | "running" | "completed" | "failed";
