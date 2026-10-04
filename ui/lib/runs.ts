@@ -43,7 +43,7 @@ export async function listRuns(): Promise<RecordedRunInfo[]> {
   }
   found.sort((a, b) => b.mtime - a.mtime); // newest first
   const out: RecordedRunInfo[] = [];
-  for (const { name, dir } of found) {
+  for (const { name, dir, mtime } of found) {
     let meta: Record<string, any> = {};
     try {
       meta = JSON.parse(await fs.readFile(path.join(dir, "summary.json"), "utf-8"));
@@ -65,6 +65,9 @@ export async function listRuns(): Promise<RecordedRunInfo[]> {
       manifest_id: meta.manifest_id ?? started.manifest_id ?? null,
       measurement: meta.measurement ?? started.measurement ?? (backend ? (backend === "mock" ? "mock" : "real") : null),
       max_wait: meta.max_wait?.description ?? started.max_wait?.description ?? null,
+      max_wait_info: { ...(started ?? {}), ...(meta.max_wait ? { max_wait: meta.max_wait } : {}) },
+      generation: meta.generation ?? started.generation ?? null,
+      updated_ms: mtime,
       summary: meta.summary ?? null,
     });
   }

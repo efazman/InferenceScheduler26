@@ -1,4 +1,5 @@
-import type { ReplayState, RunSummary } from "@/lib/types";
+import type { ReplayState } from "@/lib/types";
+import type { RunSummaryView } from "@/lib/view";
 import { POLICY_LABEL } from "@/lib/types";
 import { fmtSec, type LiveMetrics, sizeOf } from "@/lib/replay";
 
@@ -21,7 +22,7 @@ export function RunningCard({ state }: { state: ReplayState }) {
           <div className="kv"><span>Chosen because</span><b>{r.selectedBy?.replace("_", " ") ?? "–"}</b></div>
         </div>
       ) : (
-        <p className="muted">Backend idle.</p>
+        <p className="muted">GPU idle.</p>
       )}
     </section>
   );
@@ -32,7 +33,7 @@ export function QueueTable({ state, maxWaitMs }: { state: ReplayState; maxWaitMs
     <section className="card">
       <h3>Queue <span className="muted small">in service order</span></h3>
       {state.queue.length === 0 ? (
-        <p className="muted">Empty.</p>
+        <p className="muted">Queue empty.</p>
       ) : (
         <table className="tbl">
           <thead>
@@ -117,43 +118,59 @@ export function CompletedTable({ state }: { state: ReplayState }) {
   );
 }
 
-const SUMMARY_ROWS: [string, keyof RunSummary, "min" | "max", (v: number) => string][] = [
-  ["Mean latency", "mean_latency_ms", "min", (v) => fmtSec(v)],
-  ["p50 latency", "p50_latency_ms", "min", (v) => fmtSec(v)],
-  ["p95 latency", "p95_latency_ms", "min", (v) => fmtSec(v)],
-  ["Mean queue wait", "mean_queue_wait_ms", "min", (v) => fmtSec(v)],
-  ["Max queue wait", "max_queue_wait_ms", "min", (v) => fmtSec(v)],
-  ["Short-request latency", "short_mean_latency_ms", "min", (v) => fmtSec(v)],
-  ["Long-request latency", "long_mean_latency_ms", "min", (v) => fmtSec(v)],
-  ["Long-request max wait", "long_max_queue_wait_ms", "min", (v) => fmtSec(v)],
-  ["Starved", "starvation_count", "min", (v) => `${v}`],
-  ["Throughput (sanity check)", "throughput_rps", "max", (v) => `${(v * 60).toFixed(1)}/min`],
+type Row = [label: string, key: keyof RunSummaryView, better: "min" | "max" | null, fmt: (v: number) => string];
+const SUMMARY_ROWS: Row[] = [
+  ["Mean latency", "meanLatencyMs", "min", (v) => fmtSec(v)],
+  ["p50 latency", "p50LatencyMs", "min", (v) => fmtSec(v)],
+  ["p95 latency", "p95LatencyMs", "min", (v) => fmtSec(v)],
+  ["p99 latency", "p99LatencyMs", "min", (v) => fmtSec(v)],
+  ["Mean queue wait", "meanWaitMs", "min", (v) => fmtSec(v)],
+  ["Max queue wait", "maxWaitMs", "min", (v) => fmtSec(v)],
+  ["Short-request latency", "shortMeanLatencyMs", "min", (v) => fmtSec(v)],
+  ["Long-request latency", "longMeanLatencyMs", "min", (v) => fmtSec(v)],
+  ["Long-request max wait", "longMaxWaitMs", "min", (v) => fmtSec(v)],
+  ["Waited over MAX_WAIT", "starvationCount", "min", (v) => `${v}`],
+  ["Failed requests", "failed", "min", (v) => `${v}`],
+  // K=1 reordering moves waiting around; it should not change capacity, so no winner here
+  ["Throughput (sanity check)", "throughputRpm", null, (v) => `${v.toFixed(1)}/min`],
 ];
 
-export function SummaryTable({ summaries }: { summaries: Record<string, RunSummary> }) {
-  const policies = Object.keys(summaries);
+/** End-of-run comparison. Best value per row is computed from the loaded results, never assumed. */
+export function SummaryTable({ views }: { views: RunSummaryView[] }) {
+  const p99ok = views.length > 0 && views.every((v) => v.p99Reliable);
+  const anyFailed = views.some((v) => v.failed > 0);
+  const rows = SUMMARY_ROWS.filter(([, key]) => (key !== "p99LatencyMs" || p99ok) && (key !== "failed" || anyFailed));
   return (
-    <table className="tbl summary">
-      <thead>
-        <tr><th>End of run</th>{policies.map((p) => <th key={p} className="num">{POLICY_LABEL[p] ?? p}</th>)}</tr>
-      </thead>
-      <tbody>
-        {SUMMARY_ROWS.map(([label, key, better, fmt]) => {
-          const vals = policies.map((p) => summaries[p][key] as number | null);
-          const nums = vals.filter((v): v is number => v != null);
-          const best = nums.length ? (better === "min" ? Math.min(...nums) : Math.max(...nums)) : null;
-          // Throughput is a sanity check (it should not change under K=1 reordering): never crown a winner.
-          const tie = key === "throughput_rps" || nums.every((v) => Math.abs(v - (best ?? v)) <= 1e-6 * Math.max(1, Math.abs(v)));
-          return (
-            <tr key={key as string}>
-              <td>{label}</td>
-              {vals.map((v, i) => (
-                <td key={policies[i]} className={`num${!tie && v === best ? " best" : ""}`}>{v == null ? "–" : fmt(v)}</td>
-              ))}
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <>
+      <table className="tbl summary">
+        <thead>
+          <tr><th>Metric</th>{views.map((v) => <th key={v.policy} className="num">{POLICY_LABEL[v.policy] ?? v.policy}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, key, better, fmt]) => {
+            const vals = views.map((v) => v[key] as number | null);
+            const nums = vals.filter((x): x is number => x != null);
+            const best = better && nums.length ? (better === "min" ? Math.min(...nums) : Math.max(...nums)) : null;
+            const tie = best == null || nums.every((x) => Math.abs(x - best) <= 1e-6 * Math.max(1, Math.abs(x)));
+            return (
+              <tr key={key} className={key === "throughputRpm" ? "secondary" : undefined}>
+                <td>{label}</td>
+                {vals.map((x, i) => {
+                  const win = !tie && x != null && Math.abs(x - (best as number)) <= 1e-6 * Math.max(1, Math.abs(x));
+                  return <td key={views[i].policy} className={`num${win ? " best" : ""}`}>
+                    {x == null ? "–" : fmt(x)}{win && <span className="best-mark" aria-label="best"> ✓</span>}
+                  </td>;
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="muted small table-note">
+        ✓ = best in row. {views[0] ? `${views[0].n} requests per policy. ` : ""}
+        {p99ok ? "" : "p99 hidden: fewer than 100 completed requests per policy. "}
+        Lower is better except throughput, which K = 1 reordering should not change.
+      </p>
+    </>
   );
 }

@@ -68,6 +68,9 @@ export interface RecordedRunInfo {
   manifest_id: string | null; // runs with the same manifest replayed the same arrival trace
   measurement: "real" | "mock" | null;
   max_wait: string | null; // e.g. "18.1 s = 3 x median service 6.04 s (runs.jsonl, n=2000)"
+  max_wait_info: Record<string, any> | null; // structured: mode, multiplier, median_service_ms, ...
+  generation: Record<string, any> | null; // real runs: model_name, quantization, max_new_tokens, ...
+  updated_ms: number; // events.jsonl mtime: an incomplete run that stopped updating is not "live"
   summary: RunSummary | null;
 }
 
