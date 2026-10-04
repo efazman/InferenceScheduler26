@@ -1,7 +1,7 @@
 # Merge plan: `feature/scheduler-ui-parallel` → `master` (on the RTX 3060 Ti machine)
 
 **Verified 2026-10-03 against the fetched `origin/master` = `f4a6923` ("Finishing up ML"):**
-`git merge-tree` reports a clean merge. The branch adds 52 files and modifies one (`.gitignore`,
+`git merge-tree` reports a clean merge. The branch adds 54 files and modifies one (`.gitignore`,
 appended lines only). That result covers *pushed* master only. Any GPU-side work that's
 committed locally but not pushed, or uncommitted, hasn't been checked, so redo the dry run on the
 GPU machine first (step 3 below).
