@@ -2,10 +2,10 @@
 
 *As of 2026-10-04 · scheduler workstream*
 
-**The scheduler, the demo dashboard and the Tiger Data connection are built and tested.** They
-can switch to the real predictor and the real Llama model as soon as the label run on the GPU
-machine finishes, with no new engineering. The one open setting, the adaptive policy's fairness
-threshold, is now decided (see below).
+**The scheduler, the demo dashboard and the Tiger Data connection are built and tested, and the
+dashboard is polished for judging.** They can switch to the real predictor and the real Llama
+model as soon as the label run on the GPU machine finishes, with no new engineering. The one open
+setting, the adaptive policy's fairness threshold, is decided (see below).
 
 ## Where things stand
 
@@ -14,13 +14,13 @@ threshold, is now decided (see below).
 | Scheduler with three policies | Done | Decides which request runs next: first-come-first-served (FIFO), shortest-job-first (SEJF), or our adaptive policy |
 | Simulator | Done | Replays realistic traffic patterns in seconds, with no GPU needed |
 | Event log and metrics | Done | Records every step of every request: wait time, latency, throughput, starvation |
-| Demo dashboard | Done | Shows the queue reordering live, side by side for all three policies |
+| Demo dashboard | Done, demo-ready | Shows the scheduling story at a glance; real results slot in without changes (details below) |
 | Connection to the real Llama model | Built, not yet run | Tested against a stand-in server. The real run needs the GPU machine. |
 | Connection to the real predictor | Built, not yet run | Works with whichever predictor wins (DistilBERT or the simple baseline) |
 | Tiger Data (analytics database) | Done, waiting for real data | Connected and tested. The results table exists and is empty until the real runs. |
 
 All of this is on a separate branch, so it can't interfere with the label run on the GPU machine.
-It merges cleanly with the latest main code. 185 automated checks pass.
+It merges cleanly with the latest main code. 191 automated checks pass (185 backend, 6 dashboard).
 
 ## Tiger Data
 
@@ -37,19 +37,35 @@ It merges cleanly with the latest main code. 185 automated checks pass.
 No test or made-up data was put in the results table. The connection test used a temporary table
 and deleted it afterwards.
 
-## What the demo shows
+## Dashboard (frontend)
 
-The dashboard puts the same requests under all three policies, at the same moment, one above the
-other:
+**Status: demo-ready.** A judge sees the point within seconds of opening it, without clicking
+anything.
 
-- **FIFO:** a long request at the front blocks every short one behind it (`LONG | SHORT | SHORT | SHORT`).
+**What it shows when it opens:** the same requests under all three policies, at the same moment,
+stacked one above the other:
+
+- **FIFO:** a long request is next, with every short one stuck behind it (`LONG | SHORT | SHORT | SHORT`).
 - **SEJF:** the short requests go first (`SHORT | SHORT | SHORT | LONG`).
-- **Adaptive:** short requests go first until someone has waited too long, then that request is
-  served (it turns red on screen).
+- **Adaptive:** short requests go first, but any request that has waited too long is labelled
+  **⚠ OVERDUE** and moved to the front.
 
-Below that sit a timeline of which request held the GPU when, live metrics, and an end-of-run
-comparison table. A second tab plays back recorded runs, and shows real runs live while they
-execute.
+| What | Status |
+| --- | --- |
+| Opening screen | Starts on the head-of-line example, paused at the moment FIFO is about to run the long request. Everything important fits on one laptop screen. |
+| Queue view | Per policy: which request is on the GPU, the queue in the order it will be served (next one marked), each request's predicted size and wait, and running totals |
+| One-click story | Three buttons jump to the key moments: **1 · Head-of-line**, **2 · Overdue promotion**, **3 · Results**. The moments are found in the data, not staged. |
+| Traffic presets | Head-of-line blocking (default), Mostly short, Balanced, Mostly long, Bursty |
+| Results table | FIFO vs SEJF vs Adaptive on average, typical and slow-case latency, wait times, short- vs long-request latency and starvation, with the best value in each row ticked. Throughput is shown as a sanity check only. |
+| Fairness setting | Always shown, with where it came from (for real runs: "3 × median model answer time") |
+| Real vs test labelling | Every screen carries a **SIMULATED**, **MOCK** or **REAL** badge. Anything unlabelled shows **UNKNOWN**, never real. Live, recorded and stopped runs are labelled too. |
+| Real-run tab | Ready. Says **NO REAL RUNS YET** until the GPU runs exist, then shows them with the same views, plus which model and predictor were used |
+| Tiger Data history | Shows stored runs. If the database is down, the dashboard says so and keeps working from local files. |
+| Checked | Builds cleanly, no browser errors, fits laptop and desktop screens, 6 automated checks |
+
+**Demo script:** a 60–90 second walkthrough with direct links for each screenshot is in
+`docs/DEMO_FLOW.md`. No real-run screenshots exist yet. Those wait for the GPU runs, and nothing
+is faked in the meantime.
 
 ## Results so far (simulated, not real measurements)
 
@@ -101,7 +117,7 @@ used, and the dashboard shows it. Other multipliers (2×, 5×) can be tried late
    prompts in the same order.
 4. Set the maximum wait (see the decision above) and record the runs.
 5. Send the results to Tiger Data: live during the runs, or uploaded right after. The connection and table are ready.
-6. Demo: the simulation tab for the story, and the recorded tab for the real runs.
+6. Demo: follow `docs/DEMO_FLOW.md`. Use the simulation tab for the story and the recorded tab for the real results, then take the real-run screenshots.
 
 ## Risks
 
