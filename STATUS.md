@@ -68,7 +68,7 @@ inside the 4096 context. The selected subset maxes at 2,719 chars.
 
 | | |
 | --- | --- |
-| Source | `lmsys/lmsys-chat-1m` (gated; access granted to `efazr`) |
+| Source | `lmsys/lmsys-chat-1m` (gated dataset; access granted on the Hugging Face account used) |
 | Raw | `data/raw/lmsys-chat-1m/`, 6 parquet shards, 1.4 GB |
 | Rows read | 1,000,000 |
 | Kept after filters | **316,816** |

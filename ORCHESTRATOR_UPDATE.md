@@ -3,7 +3,7 @@
 Post-integration state. ML detail in `STATUS.md`; scheduler detail in `scheduler/README.md`,
 `ui/README.md`, `docs/`. Measured results in `docs/REAL_RESULTS.md` and `STATUS.md`.
 
-Repo: `C:\Users\efazr\Desktop\Mhacks26\InferenceScheduler26` (**not** `~/MHacks26`)
+Repo root: the directory containing this file. Commands below assume you are in it.
 Remote: `https://github.com/efazman/InferenceScheduler26.git`
 
 ```
