@@ -609,3 +609,110 @@ If scheduler experiments later show that underprediction is hurting tail latency
 gap helps, **128 is the conservative alternative**: 5.7% worse MAE, half the severe
 underprediction, same negligible overhead. Both artifacts are saved, so switching is a one-line
 path change rather than a retrain.
+
+---
+
+# REAL SCHEDULER EXPERIMENT — measured on the RTX 3060 Ti
+
+Everything in this section was measured on this machine with the real predictor and real
+Llama 3.1 8B Q4_K_M inference. Nothing here is simulated.
+
+## Setup
+
+| | |
+| --- | --- |
+| Merge | `ab52ef9` — scheduler + dashboard + Tiger Data from `feature/scheduler-ui-parallel` |
+| Predictor | `distilbert:artifacts\maxlen_512`, **3.06 ms** per `predict()` on this machine |
+| Backend | llama.cpp `llama-server` b11381-836d57176, Llama 3.1 8B Instruct Q4_K_M, `-np 1` (**K=1**) |
+| Manifest | `dc37a5a86f129b1e` — 112 requests, **held-out test split** the predictor never trained on |
+| Arrivals | 7,000 ms mean inter-arrival, seed 42; identical across policies |
+| MAX_WAIT | derived, **14,079 ms** = 3.0 × median service 4,693 ms (`runs.jsonl`, n=3001) |
+| Failures | **0** in all four runs |
+
+`python -m scheduler report` validated like-for-like before comparing: same manifest, backend,
+generation settings, threshold, request set, arrival timestamps, and **predictor output matching to
+0.0000 tokens** across policies. Only execution order differed.
+
+## Measured results
+
+| Metric | FIFO | SEJF | Adaptive 3× | Adaptive 5× |
+| --- | --- | --- | --- | --- |
+| Mean latency (s) | 16.65 | **13.36** | 15.75 | 16.34 |
+| p50 latency (s) | 12.27 | **8.78** | 10.62 | 10.58 |
+| p95 latency (s) | 48.70 | 51.65 | **44.18** | 46.20 |
+| p99 latency (s) | 57.76 | 80.56 | **51.80** | 53.71 |
+| Mean queue wait (s) | 10.81 | **7.66** | 10.13 | 10.62 |
+| Max queue wait (s) | 54.75 | 72.17 | **48.78** | 50.82 |
+| Short-request mean latency (s) | 14.02 | **7.03** | 13.66 | 14.23 |
+| Long-request mean latency (s) | 18.23 | 17.45 | **17.11** | 17.70 |
+| Long-request max wait (s) | 54.32 | 72.17 | **48.37** | 50.34 |
+| Throughput (req/min) | 7.94 | 7.94 | 7.95 | 7.92 |
+| Starved, own threshold | 28 | 18 | 35 | 25 |
+
+Threshold for FIFO / SEJF / Adaptive 3× is 14.08 s; Adaptive 5× used 23.47 s. Short/long split:
+42 short / 70 long, by workload label else actual output ≥ 300 tokens.
+
+**Starvation counts at each run's own threshold are not comparable.** Recomputed at a common
+threshold from the raw queue waits:
+
+| Starved at | FIFO | SEJF | Adaptive 3× | Adaptive 5× |
+| --- | --- | --- | --- | --- |
+| > 14.08 s | 28 | **18** | 35 | 34 |
+| > 23.47 s | 19 | **9** | 20 | 25 |
+
+## What the numbers show
+
+**Head-of-line blocking is real, and SEJF fixes it.** Short-request mean latency halves,
+**14.02 s → 7.03 s**; p50 latency drops 12.27 s → 8.78 s; p50 queue wait drops 5.94 s → 2.32 s.
+
+**SEJF's cost is the tail, and it is large.** p99 rises to **80.56 s** (FIFO 57.76 s) and max queue
+wait to **72.17 s** (FIFO 54.75 s). Long requests are repeatedly overtaken.
+
+**Throughput is flat at ~7.94 req/min across all four runs.** Expected: with K=1 and no preemption,
+reordering cannot create decode capacity. **No throughput improvement is claimed.** It serves only
+as a sanity check that no run stalled or silently failed.
+
+**Adaptive buys tail control, and pays for it in short-job latency.** It is best of all four on
+every tail metric — p95 44.18 s, p99 51.80 s, max queue wait 48.78 s, long-request max wait
+48.37 s, all better than *both* FIFO and SEJF. But its short-request latency (13.66 s) is only 2.6%
+better than FIFO, nowhere near SEJF's 7.03 s.
+
+### Why — measured, not assumed
+
+The policy is not misbehaving, and it is **not** mostly running in FIFO mode. Counting its own
+selection reasons:
+
+| Run | by shortest-estimate | because overdue |
+| --- | --- | --- |
+| Adaptive 3× | 77 / 112 (**69%**) | 35 / 112 (31%) |
+| Adaptive 5× | 87 / 112 (**78%**) | 25 / 112 (22%) |
+
+So it prefers short jobs most of the time, and its p50 queue wait (3.43 s) is much better than
+FIFO's (5.94 s). The short-job *mean* is nonetheless dragged back to FIFO levels by the overdue
+promotions themselves: at K = 1 with no preemption, promoting one long request blocks every short
+request behind it for that request's full service time — and service times are heavy-tailed here
+(p50 output 407 tokens, p90 918). A handful of expensive promotions is enough to erase the
+short-job gain in the mean.
+
+**Raising the multiplier does not escape this.** 5× promoted fewer requests (25 vs 35) but each
+promotion happened later, with a larger backlog of short requests accumulated behind it. Every
+metric came out slightly worse than 3×: short-job latency 14.23 s vs 13.66 s, p99 53.71 s vs
+51.80 s, max wait 50.82 s vs 48.78 s, and *more* requests past the common 23.47 s line (25 vs 20).
+
+**Conclusion: 3× is the better operating point, and the honest framing is a three-way tradeoff, not
+a policy that dominates.** SEJF optimises the body of the latency distribution; Adaptive optimises
+the tail; FIFO does neither well. Bounded wait at K = 1 without preemption has a real price, and
+this experiment measures it rather than assuming it away.
+
+## Tiger Data
+
+`scheduler_events` in the `db-inference` Tiger Cloud service: **2,694 rows for the three
+14.08 s-threshold runs, all `measurement = real`.** Import is idempotent (a re-import added 0
+rows). Credentials live in `tiger-cloud-db-inference-credentials.env` at the repo root, gitignored
+and untracked, verified by `tests/test_repo_hygiene.py`.
+
+## Dashboard
+
+Built clean (Next.js 16.3.8, TypeScript clean, node v24.19.0) and served at `localhost:3000`.
+`/api/runs` lists all real runs with `measurement = real`; `/api/tiger` reports `connected` and
+returns per-run metrics read back from Tiger Data that match the local summaries.
