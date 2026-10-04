@@ -17,7 +17,7 @@ fairness setting has to be tuned to how busy the system is.
 | Demo dashboard | Done | Shows the queue reordering live, side by side for all three policies |
 | Connection to the real Llama model | Built, not yet run | Tested against a stand-in server. The real run needs the GPU machine. |
 | Connection to the real predictor | Built, not yet run | Works with whichever predictor wins (DistilBERT or the simple baseline) |
-| Tiger Data (analytics database) | Placeholder only | Waiting on credentials and a schema decision |
+| Tiger Data (analytics database) | Done | Connected and tested; the results table is created and empty, waiting for the real runs |
 
 All of this is on a separate branch, so it can't interfere with the label run on the GPU machine.
 It merges cleanly with the latest main code. 155 automated checks pass.
@@ -75,7 +75,6 @@ used, and the dashboard shows it. Other multipliers (2×, 5×) can be tried late
 | Blocker | What it holds up | What unblocks it |
 | --- | --- | --- |
 | The GPU machine is busy with the label run | Real-model runs, and the merge itself | The label run and predictor training finishing |
-| No Tiger Data credentials | Storing results in the analytics database | A team member creates the database and shares the connection details |
 | The branch needs merging on the GPU machine | Real-model runs | The label run finishing; steps are in docs/MERGE_PLAN.md |
 
 ## Next steps once the GPU machine is free
@@ -85,7 +84,7 @@ used, and the dashboard shows it. Other multipliers (2×, 5×) can be tried late
 3. Take the held-out test prompts the predictor never saw, and run each policy on the same
    prompts in the same order.
 4. Set the maximum wait (see the decision above) and record the runs.
-5. Connect Tiger Data, if credentials are available.
+5. Send the results to Tiger Data (connection already set up and tested).
 6. Demo: the simulation tab for the story, and the recorded tab for the real runs.
 
 ## Risks
@@ -95,4 +94,4 @@ used, and the dashboard shows it. Other multipliers (2×, 5×) can be tried late
 | The real predictor is less accurate than the stand-in | SEJF and Adaptive gain less | The baseline predictor plugs in the same way, and the results will show the difference honestly |
 | A run on the GPU machine during label generation | It slows or stalls the label run (this happened once already) | Only run after generation finishes |
 | Real answer times differ from the simulator's assumptions | Simulated results don't carry over exactly | The real runs replace the simulated numbers; the simulator only explains the behaviour |
-| No Tiger Data in time | The analytics story is weaker | Everything is already saved to local files, and the dashboard reads those |
+| Tiger Data unreachable during the demo | The live database copy lags | Runs never depend on it; results are saved locally and can be uploaded afterwards |

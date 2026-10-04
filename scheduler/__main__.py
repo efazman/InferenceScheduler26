@@ -26,7 +26,7 @@ from pathlib import Path
 from scheduler import config
 from scheduler.clock import WallClock
 from scheduler.engine import SchedulerEngine
-from scheduler.events import LocalJsonlEventSink, read_events
+from scheduler.events import FanoutSink, LocalJsonlEventSink, read_events
 from scheduler.manifest import Manifest, manifest_from_prompt_rows, manifest_from_workload
 from scheduler.max_wait import resolve_max_wait, service_times_from_file
 from scheduler.metrics import P99_MIN_SAMPLES, percentile, summarize
@@ -271,6 +271,17 @@ def cmd_run(a):
                 "predictor_spec": a.predictor, "generation": _generation_settings(a.backend),
                 "time_scale": 1.0 / a.speedup}
     sink = LocalJsonlEventSink(run_dir / "events.jsonl", fsync=a.backend != "mock")
+    tiger = None
+    if a.tiger:  # optional copy to Tiger Data; the local JSONL above is always written
+        from scheduler.tigerdata import TigerConfigError, TigerDataEventSink
+
+        try:
+            tiger = TigerDataEventSink(env_file=a.tiger_env_file)
+        except (TigerConfigError, ValueError) as e:
+            sink.close()
+            sys.exit(f"error: --tiger: {e}")
+        sink = FanoutSink(sink, tiger)
+        print(f"also streaming events to Tiger Data table {tiger.table} (credentials from {tiger.source})")
     engine = SchedulerEngine(predictor, backend, make_policy(a.policy, effective_max_wait), sink, WallClock(),
                              workload_name=manifest.name, run_id=run_name, starvation_threshold_ms=effective_max_wait,
                              run_metadata=run_meta)
@@ -285,8 +296,63 @@ def cmd_run(a):
             "max_wait_ms": effective_max_wait, "summary": summarize(done, effective_max_wait)}
     if a.backend == "mock":
         meta["warning"] = f"MOCK backend: synthetic lengths; times compressed {a.speedup}x."
+    if tiger is not None:
+        meta["tiger"] = tiger.stats()  # the sink was flushed and closed with the fan-out above
+        if tiger.rows_dropped or tiger.errors:
+            print(f"warning: Tiger Data: {tiger.rows_dropped} rows not written, {tiger.errors} errors "
+                  f"({tiger.last_error}). The local events.jsonl is complete; re-upload with: "
+                  f"python -m scheduler tiger-import {run_dir}")
     (run_dir / "summary.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(json.dumps(meta["summary"], indent=2))
+
+
+def _tiger_conn(a):
+    from scheduler.tigerdata import TigerConfigError, connect, resolve_dsn
+
+    try:
+        dsn, source = resolve_dsn(a.tiger_env_file)
+        return connect(dsn), source
+    except TigerConfigError as e:
+        sys.exit(f"error: {e}")
+
+
+def cmd_tiger_check(a):
+    from scheduler.tigerdata import table_status
+
+    conn, source = _tiger_conn(a)
+    with conn:
+        conn.read_only = True
+        user, db, ver = conn.execute("select current_user, current_database(), split_part(version(), ' ', 2)").fetchone()
+        ts = conn.execute("select extversion from pg_extension where extname = 'timescaledb'").fetchone()
+        print(json.dumps({"connected": True, "credentials_from": source, "user": user, "database": db,
+                          "postgres": ver, "timescaledb": ts[0] if ts else None, **table_status(conn, a.table)},
+                         indent=2))
+
+
+def cmd_tiger_init(a):
+    from scheduler.tigerdata import apply_schema, table_status
+
+    conn, source = _tiger_conn(a)
+    with conn:
+        apply_schema(conn, a.table)
+        print(json.dumps({"schema_applied": True, "credentials_from": source, **table_status(conn, a.table)}, indent=2))
+
+
+def cmd_tiger_import(a):
+    from scheduler.tigerdata import import_events, measurement_of
+
+    conn, source = _tiger_conn(a)
+    with conn:
+        for d in a.run_dirs:
+            events = read_events(Path(d) / "events.jsonl")
+            started = next((e for e in events if e["event_type"] == "run_started"), {})
+            kind = measurement_of(started, started.get("data") or {}) if started else "unknown"
+            if kind != "real" and not a.allow_non_real:
+                print(f"skipped {d}: measurement={kind} (only real runs by default; --allow-non-real to upload "
+                      f"it labelled as {kind})")
+                continue
+            n = import_events(conn, events, a.table)
+            print(f"{d}: {n} new rows ({len(events) - n} already present), measurement={kind}")
 
 
 def _run_facts(run_dir: Path) -> dict:
@@ -425,7 +491,25 @@ def main(argv=None):
     p.add_argument("--speedup", type=float, default=1.0, help="mock only: compress time by this factor")
     p.add_argument("--run-name", default=None)
     p.add_argument("--runs-dir", default=str(config.RUNS_DIR))
+    p.add_argument("--tiger", action="store_true", help="also stream events to Tiger Data (needs credentials)")
+    p.add_argument("--tiger-env-file", default=None, help="Tiger Cloud .env (default: repo-root download)")
     p.set_defaults(fn=cmd_run)
+
+    def tiger_args(p):
+        p.add_argument("--tiger-env-file", default=None, help="Tiger Cloud .env (default: repo-root download)")
+        p.add_argument("--table", default="scheduler_events")
+
+    p = sub.add_parser("tiger-check", help="read-only Tiger Data connection + table check")
+    tiger_args(p)
+    p.set_defaults(fn=cmd_tiger_check)
+    p = sub.add_parser("tiger-init", help="create the Tiger Data scheduler_events hypertable (idempotent)")
+    tiger_args(p)
+    p.set_defaults(fn=cmd_tiger_init)
+    p = sub.add_parser("tiger-import", help="upload recorded runs' events to Tiger Data (idempotent)")
+    tiger_args(p)
+    p.add_argument("run_dirs", nargs="+")
+    p.add_argument("--allow-non-real", action="store_true", help="also upload mock runs (labelled mock)")
+    p.set_defaults(fn=cmd_tiger_import)
 
     p = sub.add_parser("report", help="compare runs of one manifest + check they are like-for-like")
     p.add_argument("run_dirs", nargs="+")

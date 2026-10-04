@@ -136,13 +136,33 @@ The **Recorded / live runs** tab shows each run, labelled **REAL measurement · 
 the three runs share a manifest, it adds a same-manifest comparison (queue strips, timeline,
 summary). Runs started while the dashboard is open are shown live.
 
-## 16. Tiger Data (only if credentials exist)
+## 16. Tiger Data
 
-The schema is in `scheduler/tigerdata_schema.sql`, and `scheduler.events.tiger_row()` already maps
-events to its columns. What's left is implementing `TigerDataEventSink` (a psycopg batch insert
-from `TIGER_DATA_DSN`) and wrapping the sink in `cmd_run` as
-`FanoutSink(LocalJsonlEventSink(...), TigerDataEventSink())`. The local JSONL stays the source of
-truth. If Tiger Data isn't ready, skip this step. Nothing depends on it.
+The `scheduler_events` hypertable already exists in the `db-inference` Tiger Cloud service (it was
+created from the Mac with `tiger-init`, and it's empty). On the GPU machine:
+
+1. Copy `tiger-cloud-db-inference-credentials.env` to the repo root **by hand** (USB or a password
+   manager, never git or chat). It's gitignored there. Alternatively, set `TIGER_DATA_DSN` in the
+   shell.
+2. Install the driver and check the connection, read-only:
+   ```powershell
+   .\.venv\Scripts\python.exe -m pip install -r requirements-tiger.txt
+   .\.venv\Scripts\python.exe -m scheduler tiger-check
+   ```
+3. Either add `--tiger` to the three `run` commands in step 13, which streams events live, or upload
+   afterwards:
+   ```powershell
+   .\.venv\Scripts\python.exe -m scheduler tiger-import scheduler_runs\real-fifo scheduler_runs\real-sejf scheduler_runs\real-adaptive
+   ```
+
+Each row is labelled `measurement = real | mock | simulated`. `tiger-import` uploads only real runs
+unless you pass `--allow-non-real`. Uploads are idempotent (one row per run_id + seq), so re-running
+an import, or importing a run that was also streamed live, adds nothing twice.
+
+The sink can't hurt a run. Writes happen on a background thread with retries, and if the database
+is unreachable the run carries on, `summary.json` records the rows that didn't make it, and
+`tiger-import` fills them in later. Example query (per-policy latency for one manifest) at the
+bottom of `scheduler/tigerdata_schema.sql`.
 
 ## 17. Record the demo
 

@@ -8,6 +8,8 @@ Event types (in a request's lifetime order):
     request_arrived -> cost_predicted -> request_enqueued -> request_selected
     -> inference_started -> inference_completed | request_failed
 Run-level: run_started, queue_snapshot (policy order after every queue change), run_completed.
+
+Tiger Data (PostgreSQL + TimescaleDB) support lives in scheduler/tigerdata.py.
 """
 
 from __future__ import annotations
@@ -130,53 +132,6 @@ class FanoutSink:
     def close(self) -> None:
         for s in [self.primary, *self.secondary]:
             s.close()
-
-
-TIGER_COLUMNS = ("timestamp", "engine_time_ms", "seq", "run_id", "manifest_id", "event_type", "request_id",
-                 "policy", "queue_depth", "predicted_output_tokens", "uncertainty", "actual_output_tokens",
-                 "queue_wait_ms", "service_time_ms", "end_to_end_latency_ms", "workload_name", "backend",
-                 "predictor", "simulated", "success", "failure_reason", "data")
-
-
-def tiger_row(event: dict, manifest_id: str | None = None) -> dict:
-    """Map one event (Event.to_dict() or a JSONL line) to a scheduler_events row
-    (scheduler/tigerdata_schema.sql). ``manifest_id`` comes from the run's run_started event."""
-    return {
-        "timestamp": event.get("wall_time"), "engine_time_ms": event["timestamp_ms"], "seq": event["seq"],
-        "run_id": event.get("run_id"), "manifest_id": manifest_id, "event_type": event["event_type"],
-        "request_id": event.get("request_id"), "policy": event.get("scheduler_policy"),
-        "queue_depth": event.get("queue_depth"), "predicted_output_tokens": event.get("predicted_output_tokens"),
-        "uncertainty": event.get("uncertainty"), "actual_output_tokens": event.get("actual_output_tokens"),
-        "queue_wait_ms": event.get("queue_wait_ms"), "service_time_ms": event.get("service_time_ms"),
-        "end_to_end_latency_ms": event.get("end_to_end_latency_ms"), "workload_name": event.get("workload_name"),
-        "backend": event.get("backend"), "predictor": event.get("predictor"), "simulated": event.get("simulated"),
-        "success": event.get("success"), "failure_reason": event.get("error"), "data": event.get("data") or {},
-    }
-
-
-class TigerDataEventSink:
-    """INTEGRATION POINT - not implemented (no credentials yet). Local JSONL never depends on it.
-
-    Tiger Data is PostgreSQL + TimescaleDB. The table is in scheduler/tigerdata_schema.sql, and
-    tiger_row() already maps events to its columns, so the remaining work is a psycopg connection
-    from TIGER_DATA_DSN that buffers tiger_row(event.to_dict(), manifest_id) rows and inserts them
-    in batches (flushing on close). Wire it as
-    FanoutSink(LocalJsonlEventSink(...), TigerDataEventSink(...)) in scheduler/__main__.py
-    cmd_run, so the local log stays the source of truth and a database outage can't break a run.
-    Never store credentials in the repo.
-    """
-
-    def __init__(self, dsn: str | None = None):
-        self.dsn = dsn or os.environ.get("TIGER_DATA_DSN")
-        raise NotImplementedError(
-            "TigerDataEventSink is a placeholder; use LocalJsonlEventSink until Tiger Data is wired up "
-            "(see the docstring for the planned schema).")
-
-    def emit(self, event: Event) -> None:  # pragma: no cover
-        raise NotImplementedError
-
-    def close(self) -> None:  # pragma: no cover
-        pass
 
 
 def read_events(path: str | Path) -> list[dict]:

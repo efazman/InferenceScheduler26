@@ -9,8 +9,7 @@ from scheduler import events as ev
 from scheduler.backends import LlamaCppBackend, MockInferenceBackend
 from scheduler.clock import VirtualClock, WallClock
 from scheduler.engine import SchedulerEngine
-from scheduler.events import (FanoutSink, InMemoryEventSink, LocalJsonlEventSink, NullSink, TigerDataEventSink,
-                              read_events)
+from scheduler.events import FanoutSink, InMemoryEventSink, LocalJsonlEventSink, NullSink, read_events
 from scheduler.metrics import percentile, summarize
 from scheduler.models import Request, RequestState
 from scheduler.policies import AdaptivePolicy, FIFOPolicy, SEJFPolicy
@@ -210,26 +209,6 @@ def test_fanout_tolerates_failing_secondary_sink():
     fan = FanoutSink(mem, Broken())
     run(HOL, FIFOPolicy(), sink=fan)
     assert mem.events and fan.secondary_errors == len(mem.events)
-
-
-def test_tiger_rows_cover_the_planned_schema():
-    from pathlib import Path
-
-    from scheduler.events import TIGER_COLUMNS, tiger_row
-
-    _, eng = run(HOL, AdaptivePolicy(50))
-    rows = [tiger_row(e.to_dict(), manifest_id="m1") for e in eng.sink.events]
-    assert all(tuple(r) == TIGER_COLUMNS for r in rows)
-    done = [r for r in rows if r["event_type"] == "inference_completed"]
-    assert done and all(r["policy"] == "adaptive" and r["end_to_end_latency_ms"] is not None for r in done)
-    sql = (Path(__file__).resolve().parent.parent / "scheduler" / "tigerdata_schema.sql").read_text()
-    for col in TIGER_COLUMNS:  # every mapped column exists in the DDL
-        assert (f'"{col}"' if col == "timestamp" else col) in sql
-
-
-def test_tiger_data_sink_is_an_explicit_placeholder():
-    with pytest.raises(NotImplementedError):
-        TigerDataEventSink(dsn="postgres://example")
 
 
 def test_normalize_prediction_accepts_extra_keys_and_rejects_bad_output():

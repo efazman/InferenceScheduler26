@@ -12,14 +12,15 @@ GPU machine first (step 3 below).
 
 | Class | Files | Merge risk |
 | --- | --- | --- |
-| **A. Mac-owned (new on this branch)** | `scheduler/**`, `ui/**`, `docs/**`, `tests/test_scheduler_*.py`, `tests/conftest.py` | None, unless the GPU side created a file at the same path |
+| **A. Mac-owned (new on this branch)** | `scheduler/**`, `ui/**`, `docs/**`, `tests/test_scheduler_*.py`, `tests/test_repo_hygiene.py`, `tests/conftest.py`, `requirements-tiger.txt` | None, unless the GPU side created a file at the same path |
 | **B. GPU-owned (untouched by this branch)** | `ml/**`, `datagen/**`, `scripts/**`, `STATUS.md`, `ORCHESTRATOR_UPDATE.md`, `requirements.txt`, `pytest.ini`, `tests/test_datagen.py`, `tests/test_pipeline.py`, `tests/test_censored_extension.py`, `data/`, `artifacts/`, `logs/` | None. This branch doesn't modify any of them. |
 | **C. Shared** | `.gitignore` (modified); `tests/conftest.py` (new path the GPU side might also create); the `ml` / `datagen` APIs the scheduler imports (not edited, but depended on) | Low. Details below. |
 
 ## File-by-file notes for class C
 
-**`.gitignore`.** This branch appends `scheduler_runs/` (local run logs, which contain prompts) and
-`data/scheduler/` (test prompts and manifests with LMSYS text). If master appended its own lines,
+**`.gitignore`.** This branch appends `scheduler_runs/` (local run logs, which contain prompts),
+`data/scheduler/` (test prompts and manifests with LMSYS text) and credential patterns (`*.env`, `.env*`,
+`tiger-cloud-*credentials*`). If master appended its own lines,
 **keep every line from both sides**: master's data/artifact/log ignores and these two. Don't
 pick one side.
 
@@ -27,6 +28,14 @@ pick one side.
 stand-in) used by `test_scheduler_engine.py`, `test_scheduler_sim.py` and
 `test_scheduler_experiment.py`. If the GPU side also created a `tests/conftest.py`, the result
 must contain **both sides' fixtures and imports**, with no duplicate fixture names.
+
+**Credentials.** The Tiger Cloud `.env`/`.txt` downloads stay out of git: `.gitignore` covers
+`*.env`, `.env*` and `tiger-cloud-*credentials*`, and `tests/test_repo_hygiene.py` fails if a
+credential file or a password-bearing URL is ever tracked. Copy the `.env` to the GPU machine by
+hand. Keep those ignore lines when resolving `.gitignore`.
+
+**`requirements-tiger.txt`.** New and optional (psycopg, for the Tiger Data sink). It's kept separate
+so that `requirements.txt`, which the GPU side owns, doesn't change.
 
 **`requirements.txt`.** This branch doesn't change it. The scheduler needs only the standard
 library plus what `ml`/`datagen` already need. Dashboard dependencies live in `ui/package.json`

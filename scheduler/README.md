@@ -17,7 +17,8 @@ prompt ──▶ Predictor ──▶ queue ──▶ SchedulerPolicy ──▶ I
 | `policies.py` | `SchedulerPolicy.order(queue, now)` and `choose_next`. Includes FIFO, SEJF and Adaptive. Policies never call the backend. |
 | `engine.py` | `SchedulerEngine(predictor, backend, policy, sink, clock)`: K = 1, non-preemptive. |
 | `clock.py` | `VirtualClock` (simulation) and `WallClock` (real runs). The same engine loop runs with either. |
-| `events.py` | Flat event schema plus sinks: `LocalJsonlEventSink`, `InMemoryEventSink`, `FanoutSink`, and `TigerDataEventSink` (placeholder). |
+| `events.py` | Flat event schema plus sinks: `LocalJsonlEventSink`, `InMemoryEventSink`, `FanoutSink`. |
+| `tigerdata.py` | Optional Tiger Data copy of the events (`TigerDataEventSink`, schema, import). Credentials come from the environment or a gitignored `.env`. |
 | `metrics.py` | Percentiles, queue wait, throughput, starvation count, short/long split. |
 | `workloads.py` | Five seeded synthetic workloads, plus `workload_from_prompts` for real prompts. |
 | `simulator.py` | Engine + `VirtualClock` + mock predictor/backend. Service = 60 ms + 13.3 ms/token. |
@@ -105,4 +106,4 @@ The real-experiment pieces:
 | `MAX_WAIT = 3.0 x median service time` (`measure-service`, `run --median-service-from`) | `scheduler/max_wait.py` |
 | Like-for-like comparison and checks (`report`) | `scheduler/__main__.py` |
 | Held-out prompts from a trained predictor (`prompts-from-split`) | `scheduler/__main__.py` |
-| Tiger Data table and row mapping (`tiger_row`); sink still a placeholder | `scheduler/tigerdata_schema.sql`, `scheduler/events.py` |
+| Tiger Data: non-blocking sink (`run --tiger`), `tiger-check`, `tiger-init`, `tiger-import`; schema | `scheduler/tigerdata.py`, `scheduler/tigerdata_schema.sql` |
