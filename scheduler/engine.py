@@ -33,7 +33,8 @@ class SchedulerEngine:
     def __init__(self, predictor, backend, policy, sink=None, clock=None, *, workload_name: str = "adhoc",
                  run_id: str | None = None, sim_predictor_latency_ms: float = config.SIM_PREDICTOR_LATENCY_MS,
                  emit_queue_snapshots: bool = True,
-                 starvation_threshold_ms: float = config.DEFAULT_STARVATION_THRESHOLD_MS):
+                 starvation_threshold_ms: float = config.DEFAULT_STARVATION_THRESHOLD_MS,
+                 run_metadata: dict | None = None):
         self.predictor = predictor
         self.backend = backend
         self.policy = policy
@@ -44,6 +45,7 @@ class SchedulerEngine:
         self.sim_predictor_latency_ms = sim_predictor_latency_ms
         self.emit_queue_snapshots = emit_queue_snapshots
         self.starvation_threshold_ms = starvation_threshold_ms
+        self.run_metadata = dict(run_metadata or {})  # e.g. manifest_id, max_wait provenance
 
         self.queue: list[Request] = []
         self.active: Request | None = None
@@ -119,6 +121,9 @@ class SchedulerEngine:
             self.clock.after_service(float(out["latency_ms"]))
             r.actual_output_tokens = int(out["output_tokens"])
             r.finish_reason = out.get("finish_reason")
+            for k in ("prompt_tokens", "server_timings"):
+                if out.get(k) is not None:
+                    r.metadata[k] = out[k]
             ok, err = True, None
         except Exception as e:  # noqa: BLE001 - one failed generation must not stop the run
             ok, err = False, f"{type(e).__name__}: {e}"
@@ -131,7 +136,8 @@ class SchedulerEngine:
         if ok:
             r.state = RequestState.COMPLETED
             self._emit(ev.INFERENCE_COMPLETED, r.end_time, r, success=True,
-                       data={"finish_reason": r.finish_reason, "selected_by": r.metadata.get("selected_by")})
+                       data={"finish_reason": r.finish_reason, "selected_by": r.metadata.get("selected_by"),
+                             **{k: r.metadata[k] for k in ("prompt_tokens", "server_timings") if k in r.metadata}})
         else:
             r.state, r.error = RequestState.FAILED, err
             self._emit(ev.REQUEST_FAILED, r.end_time, r, success=False, error=err)
@@ -143,8 +149,11 @@ class SchedulerEngine:
         ids = [r.request_id for r in pending]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate request_id in workload")
-        self._emit(ev.RUN_STARTED, self.clock.now(),
-                   data={"policy": self.policy.describe(), "n_requests": len(pending), "k": 1, "preemptive": False})
+        # Stamp the run start no later than the first arrival so it always sorts first.
+        start = min(self.clock.now(), pending[0].arrival_time) if pending else self.clock.now()
+        self._emit(ev.RUN_STARTED, start,
+                   data={"policy": self.policy.describe(), "n_requests": len(pending), "k": 1, "preemptive": False,
+                         "starvation_threshold_ms": self.starvation_threshold_ms, **self.run_metadata})
         i = 0
 
         def admit_until(t: float) -> None:

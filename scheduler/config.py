@@ -13,7 +13,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # --- adaptive / fairness -------------------------------------------------------
 # A queued request that has waited at least this long (since arrival) is "overdue": the adaptive
 # policy serves overdue requests oldest-first before falling back to shortest-estimated-first.
+#
+# Simulation / controlled experiments: an explicit static threshold (DEFAULT_MAX_WAIT_MS).
+# Real runs (llama.cpp): MAX_WAIT = DEFAULT_MAX_WAIT_MULTIPLIER x measured median service time,
+# resolved by scheduler.max_wait.resolve_max_wait. A fixed 15 s is NOT used for real runs.
 DEFAULT_MAX_WAIT_MS = 15_000.0
+DEFAULT_MAX_WAIT_MULTIPLIER = 3.0
 # Metrics count a request as "starved" when its queue wait exceeded this. Defaults to the same
 # value so FIFO / SEJF / adaptive are judged against one threshold.
 DEFAULT_STARVATION_THRESHOLD_MS = DEFAULT_MAX_WAIT_MS

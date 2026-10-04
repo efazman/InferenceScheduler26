@@ -45,6 +45,7 @@ class WorkloadRequest:
     mock_actual_tokens: int
     mock_predicted_tokens: float
     seed: int
+    category: str | None = None
 
 
 @dataclass
@@ -57,8 +58,8 @@ class Workload:
     synthetic: bool = True
 
     def to_requests(self) -> list[Request]:
-        return [Request(w.request_id, w.prompt, w.arrival_ms, seed=w.seed, size_class=w.size_class)
-                for w in self.requests]
+        return [Request(w.request_id, w.prompt, w.arrival_ms, seed=w.seed, size_class=w.size_class,
+                        category=w.category) for w in self.requests]
 
     def mock_predictor(self) -> MockPredictor:
         return MockPredictor({w.prompt: w.mock_predicted_tokens for w in self.requests})

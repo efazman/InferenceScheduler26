@@ -16,11 +16,11 @@ Settings: seed 42, offered load 0.95, prediction noise sigma 0.25 (lognormal), a
 | p99 latency (s) (unstable, n<100) | 32.22 | 58.19 | 33.08 |
 | Mean queue wait (s) | 12.68 | 6.07 | 9.26 |
 | Max queue wait (s) | 24.83 | 54.96 | 25.40 |
-| Throughput (req/min) | 18.11 | 18.11 | 18.11 |
-| Starved (wait > threshold) | 24 | 4 | 18 |
 | Short-request mean latency (s) | 14.50 | 4.69 | 9.31 |
 | Long-request mean latency (s) | 18.93 | 21.13 | 20.40 |
 | Long-request max wait (s) | 24.75 | 54.96 | 25.40 |
+| Starved (wait > threshold) | 24 | 4 | 18 |
+| Throughput, sanity check (req/min) | 18.11 | 18.11 | 18.11 |
 
 ### balanced (60 requests: 26 short / 34 long)
 
@@ -34,11 +34,11 @@ Settings: seed 42, offered load 0.95, prediction noise sigma 0.25 (lognormal), a
 | p99 latency (s) (unstable, n<100) | 70.08 | 205.22 | 70.08 |
 | Mean queue wait (s) | 37.74 | 21.24 | 37.36 |
 | Max queue wait (s) | 63.18 | 236.25 | 63.18 |
-| Throughput (req/min) | 9.97 | 9.97 | 9.97 |
-| Starved (wait > threshold) | 55 | 15 | 55 |
 | Short-request mean latency (s) | 40.05 | 5.66 | 39.13 |
 | Long-request mean latency (s) | 46.44 | 43.63 | 46.46 |
 | Long-request max wait (s) | 59.12 | 236.25 | 59.12 |
+| Starved (wait > threshold) | 55 | 15 | 55 |
+| Throughput, sanity check (req/min) | 9.97 | 9.97 | 9.97 |
 
 ### mostly_long (60 requests: 15 short / 45 long)
 
@@ -52,11 +52,11 @@ Settings: seed 42, offered load 0.95, prediction noise sigma 0.25 (lognormal), a
 | p99 latency (s) (unstable, n<100) | 68.06 | 116.55 | 68.06 |
 | Mean queue wait (s) | 18.08 | 13.69 | 17.34 |
 | Max queue wait (s) | 62.94 | 110.38 | 62.94 |
-| Throughput (req/min) | 6.62 | 6.62 | 6.62 |
-| Starved (wait > threshold) | 30 | 10 | 29 |
 | Short-request mean latency (s) | 18.08 | 7.44 | 15.02 |
 | Long-request mean latency (s) | 27.92 | 25.61 | 27.95 |
 | Long-request max wait (s) | 62.94 | 110.38 | 62.94 |
+| Starved (wait > threshold) | 30 | 10 | 29 |
+| Throughput, sanity check (req/min) | 6.62 | 6.62 | 6.62 |
 
 ### head_of_line (12 requests: 10 short / 2 long)
 
@@ -70,11 +70,11 @@ a long job is running; another long request queues first, short ones arrive behi
 | p99 latency (s) (unstable, n<100) | 24.25 | 24.52 | 24.32 |
 | Mean queue wait (s) | 16.41 | 11.49 | 12.22 |
 | Max queue wait (s) | 23.76 | 19.47 | 23.17 |
-| Throughput (req/min) | 28.46 | 28.46 | 28.46 |
-| Starved (wait > threshold) | 9 | 3 | 3 |
 | Short-request mean latency (s) | 20.03 | 12.98 | 14.14 |
 | Long-request mean latency (s) | 10.99 | 16.69 | 15.27 |
 | Long-request max wait (s) | 8.07 | 19.47 | 16.64 |
+| Starved (wait > threshold) | 9 | 3 | 3 |
+| Throughput, sanity check (req/min) | 28.46 | 28.46 | 28.46 |
 
 ### bursty (80 requests: 56 short / 24 long)
 
@@ -88,9 +88,9 @@ mixed background traffic, then a burst of short requests within one second
 | p99 latency (s) (unstable, n<100) | 86.27 | 201.82 | 86.27 |
 | Mean queue wait (s) | 43.85 | 18.33 | 42.95 |
 | Max queue wait (s) | 82.08 | 255.95 | 82.08 |
-| Throughput (req/min) | 15.55 | 15.55 | 15.55 |
-| Starved (wait > threshold) | 73 | 20 | 69 |
 | Short-request mean latency (s) | 46.07 | 9.20 | 44.58 |
 | Long-request mean latency (s) | 50.98 | 51.94 | 51.45 |
 | Long-request max wait (s) | 82.08 | 255.95 | 82.08 |
+| Starved (wait > threshold) | 73 | 20 | 69 |
+| Throughput, sanity check (req/min) | 15.55 | 15.55 | 15.55 |
 

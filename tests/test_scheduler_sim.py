@@ -133,7 +133,8 @@ def test_cli_run_real_backend_path_with_prompt_file(tmp_path, capsys, fake_llama
     prompts.write_text("".join(json.dumps({"prompt_id": f"lmsys-{i}", "prompt": f"question {i}"}) + "\n"
                                for i in range(3)))
     cli(["run", "--backend", "llamacpp", "--url", fake_llama_url, "--policy", "adaptive",
-         "--prompts-file", str(prompts), "--mean-interarrival-ms", "5", "--runs-dir", str(tmp_path),
+         "--prompts-file", str(prompts), "--mean-interarrival-ms", "5", "--median-service-ms", "6000",
+         "--runs-dir", str(tmp_path),
          "--run-name", "real"])
     meta = json.loads((tmp_path / "real" / "summary.json").read_text())
     assert meta["summary"]["n_completed"] == 3 and "warning" not in meta
