@@ -521,3 +521,54 @@ def test_status_on_empty_dir(tmp_path):
     rep = status_mod.status(tmp_path, tmp_path / "missing.jsonl")
     assert rep["prompts_complete"] == 0 and rep["generations_done"] == 0
     assert rep["eta_hours"] is None and rep["checkpoints_ready"] == []
+
+
+def test_status_eta_ignores_idle_gaps(tmp_path):
+    """A long pause must not permanently depress the ETA: it is reported, not averaged in."""
+    import datetime as dt
+    from datagen.jsonl import DurableAppender
+    subset = tmp_path / "subset.jsonl"
+    write_jsonl(make_prompts(100), subset)
+    out = tmp_path / "labels"
+    out.mkdir()
+    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    with DurableAppender(out / config.RUNS_FILE) as w:
+        # 40 generations at 6s apart, then a 2-hour stall, then 40 more at 6s apart
+        stamp = t0
+        for i in range(80):
+            if i == 40:
+                stamp += dt.timedelta(hours=2)
+            w.append({"prompt_id": f"p{i:03d}", "seed": 42, "output_tokens": 10,
+                      "latency_ms": 6000.0, "finish_reason": "stop",
+                      "timestamp": stamp.isoformat()})
+            stamp += dt.timedelta(seconds=6)
+
+    rep = status_mod.status(out, subset)
+    assert rep["longest_idle_gap_min"] == pytest.approx(120.0, abs=0.2)
+    assert rep["idle_hours"] == pytest.approx(2.0, abs=0.05)
+    # whole-run average is dragged down by the stall; active/recent are not
+    assert rep["generations_per_min"] < 1.0
+    assert rep["generations_per_min_active"] > 8.0
+    assert rep["generations_per_min_recent"] > 8.0
+    assert rep["eta_basis"] == "recent"
+    # ETA uses the achievable rate, so it must be far below the naive estimate
+    naive_h = (rep["generations_target"] - rep["generations_done"]) / rep["generations_per_min"] / 60
+    assert rep["eta_hours"] < naive_h / 5
+
+
+def test_status_without_gaps_reports_no_idle(tmp_path):
+    import datetime as dt
+    from datagen.jsonl import DurableAppender
+    subset = tmp_path / "subset.jsonl"
+    write_jsonl(make_prompts(10), subset)
+    out = tmp_path / "labels"
+    out.mkdir()
+    stamp = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    with DurableAppender(out / config.RUNS_FILE) as w:
+        for i in range(8):
+            w.append({"prompt_id": f"p{i:03d}", "seed": 42, "output_tokens": 10, "latency_ms": 1.0,
+                      "finish_reason": "stop", "timestamp": stamp.isoformat()})
+            stamp += dt.timedelta(seconds=5)
+    rep = status_mod.status(out, subset)
+    assert rep["idle_hours"] == 0.0
+    assert rep["generations_per_min"] == pytest.approx(rep["generations_per_min_active"], rel=0.01)

@@ -137,9 +137,11 @@ def generate_synthetic_dataset(n_per_category: int = 17, seed: int = 42) -> list
 def save_jsonl(examples: list[dict], path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
+    # utf-8 + ensure_ascii=False to match datagen.jsonl's writer. Without an explicit encoding
+    # Windows uses cp1252, which cannot represent real prompt text.
+    with path.open("w", encoding="utf-8") as f:
         for ex in examples:
-            f.write(json.dumps(ex) + "\n")
+            f.write(json.dumps(ex, ensure_ascii=False) + "\n")
 
 
 def load_jsonl(path: str | Path, target_field: str = "target_output_tokens",
@@ -152,7 +154,9 @@ def load_jsonl(path: str | Path, target_field: str = "target_output_tokens",
     uses. "category" and all other fields are kept as-is. MockBackend labels ("is_mock": true)
     are refused unless ``allow_mock`` is set, so they can never end up in a real training run.
     """
-    with Path(path).open() as f:
+    # Explicit utf-8: real LMSYS prompts contain non-ASCII text, and the Windows default
+    # (cp1252) raises UnicodeDecodeError on it.
+    with Path(path).open(encoding="utf-8") as f:
         examples = [json.loads(line) for line in f if line.strip()]
     for i, ex in enumerate(examples):
         if ex.get("is_mock") and not allow_mock:

@@ -10,3 +10,4 @@ vendor/
 logs/
 data/lmsys/
 data/labels/
+build/

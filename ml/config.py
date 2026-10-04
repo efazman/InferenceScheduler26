@@ -40,7 +40,11 @@ class Config:
     pooling: str = "mean"  # "mean" (masked mean pooling) or "cls"
     head_hidden_dim: int = 256  # 0 -> single linear layer
     dropout: float = 0.1
-    max_length: int = 128  # REAL-DATA: revisit once real prompt length distribution is known
+    # Prompt tokens fed to DistilBERT. 128 was chosen against the synthetic file; the real LMSYS
+    # subset has a p90 prompt of roughly 380 tokens, so 128 truncates a large share of real
+    # prompts. Compare 128 / 256 / 512 with scripts/run_maxlen_experiment.ps1 before changing the
+    # default - this is a measured decision, not a guess.
+    max_length: int = 128
 
     # --- loss --------------------------------------------------------------
     # L = loss_lambda * CE_soft + (1 - loss_lambda) * MSE
@@ -52,9 +56,17 @@ class Config:
     # --- training ----------------------------------------------------------
     learning_rate: float = 2e-5
     weight_decay: float = 0.01
-    epochs: int = 3  # REAL-DATA: increase (and add early stopping on val MAE) for real data
+    # 3 epochs came from synthetic-data validation. Kept as the default for the first controlled
+    # real-data run so dataset-size and max_length comparisons stay apples-to-apples.
+    epochs: int = 3
     batch_size: int = 8
     device: str = "auto"  # "auto" | "cpu" | "cuda" | "mps"
+    # Opt-in only. Off by default so a learning-curve or max_length comparison trains every
+    # variant for the same number of epochs. When on, training stops after `patience` epochs
+    # without a new best validation MAE and the best-MAE weights are restored.
+    early_stopping: bool = False
+    early_stopping_patience: int = 2
+    early_stopping_min_delta: float = 0.0  # val-MAE improvement that counts as progress
 
     # --- evaluation --------------------------------------------------------
     severe_underprediction_threshold: float = 0.5  # severe if pred < threshold * actual

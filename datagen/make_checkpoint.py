@@ -84,7 +84,8 @@ def cut_checkpoint(records: list[dict], n: int, out_root: Path, gen_cfg_path: Pa
     out_dir.mkdir(parents=True, exist_ok=True)
     write_jsonl(chosen, labels_out)
     if gen_cfg_path.exists():
-        (out_dir / config.GENERATION_CONFIG_FILE).write_text(gen_cfg_path.read_text())
+        (out_dir / config.GENERATION_CONFIG_FILE).write_text(
+            gen_cfg_path.read_text(encoding="utf-8"), encoding="utf-8")
     digest = hashlib.sha256(labels_out.read_bytes()).hexdigest()
     summary = {
         "checkpoint_size": n,
@@ -95,7 +96,7 @@ def cut_checkpoint(records: list[dict], n: int, out_root: Path, gen_cfg_path: Pa
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         **summarize(chosen),
     }
-    (out_dir / "checkpoint.summary.json").write_text(json.dumps(summary, indent=2))
+    (out_dir / "checkpoint.summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return summary
 
 

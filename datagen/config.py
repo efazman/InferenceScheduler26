@@ -26,7 +26,7 @@ TARGET_PERCENTILE = 90  # target = this percentile of the NUM_GENERATIONS output
 PERCENTILE_METHOD = "linear"  # numpy percentile method; with 4 runs p90 = x3 + 0.7 * (x4 - x3)
 TARGET_FIELD = f"target_p{TARGET_PERCENTILE}_output_tokens"  # field the DistilBERT pipeline trains on
 # Prompt counts at which a standalone, independently trainable label snapshot is cut (datagen.make_checkpoint).
-CHECKPOINT_SIZES = [250, 500, 1000, 2000]
+CHECKPOINT_SIZES = [250, 500, 750, 1000, 2000]
 
 # --- model / decoding ---------------------------------------------------------
 MODEL_NAME = "Llama-3.1-8B-Instruct"
@@ -102,4 +102,50 @@ def generation_config(backend_name: str) -> dict:
         "system_prompt": SYSTEM_PROMPT,
         "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
         "backend": backend_name,
+    }
+
+
+# --- censored-output extension pass -------------------------------------------
+# ~16% of base runs stop at MAX_NEW_TOKENS. Those lengths are right-censored: the true length is
+# >= the recorded count, not equal to it. The extension pass re-runs exactly those (prompt, seed)
+# pairs with a larger cap and nothing else changed, into a SEPARATE directory, so the base
+# measurements are never mutated and the two caps are never silently mixed.
+#
+# 2048 (not 1536) because the context has room for it: the worst-case prompt is MAX_PROMPT_CHARS
+# 8000 chars ~= 2000 tokens, and 2000 + 2048 = 4048 < 4096. The selected subset maxes at 2719
+# chars (~680 tokens), so real headroom is far larger.
+EXTENDED_MAX_NEW_TOKENS = 2048
+
+LABELS_DIR_EXT = DATA_DIR / "labels" / "llama31_8b_q4km_ext2048"
+EXTENDED_RUNS_FILE = "extended_runs.jsonl"  # one record per re-run capped generation
+EXTENSION_FAILURES_FILE = "extension_failures.jsonl"
+EXTENSION_CONFIG_FILE = "extension_config.json"
+
+# --- assembled final labels ---------------------------------------------------
+LABELS_DIR_FINAL = DATA_DIR / "labels" / "llama31_8b_q4km_final"
+FINAL_LABELS_FILE = "labels_final.jsonl"
+FINAL_LABELS_PATH = LABELS_DIR_FINAL / FINAL_LABELS_FILE
+
+
+def extension_config(backend_name: str, extended_max_new_tokens: int = EXTENDED_MAX_NEW_TOKENS,
+                     base_dir: str | None = None) -> dict:
+    """Settings that define one extension pass. A resumed pass must match these exactly.
+
+    Deliberately NOT part of generation_config(): adding a key there would make the live base
+    run's own config check fail on its next restart.
+    """
+    return {
+        "model": MODEL_NAME,
+        "quantization": QUANTIZATION,
+        "runtime": RUNTIME,
+        "runtime_version": RUNTIME_VERSION,
+        "temperature": TEMPERATURE,
+        "top_p": TOP_P,
+        "base_max_new_tokens": MAX_NEW_TOKENS,
+        "extended_max_new_tokens": extended_max_new_tokens,
+        "system_prompt": SYSTEM_PROMPT,
+        "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
+        "backend": backend_name,
+        "base_labels_dir": base_dir if base_dir is not None else str(LABELS_DIR_REAL),
+        "pass_kind": "censored-output-extension",
     }

@@ -131,3 +131,69 @@ def test_trained_artifacts_reload_and_predict():
     predictor = LengthPredictor.load(ARTIFACTS, device="cpu")
     assert (ARTIFACTS / "baseline.json").exists() and (ARTIFACTS / "eval_results.json").exists()
     assert_valid_prediction(predictor.predict(PROMPTS[0]), predictor.centers)
+
+
+# ---------------------------------------------------- max_length / early stopping / success bar
+
+def test_max_length_and_early_stopping_are_configurable():
+    from ml.train import main as train_main
+    import inspect
+    # the CLI exposes the experiment knobs
+    src = inspect.getsource(train_main)
+    assert "--max-length" in src and "--early-stopping" in src and "--patience" in src
+    cfg = Config()
+    assert cfg.early_stopping is False          # off by default: controlled comparisons need equal epochs
+    assert cfg.early_stopping_patience >= 1
+    assert cfg.max_length == 128                # unchanged until the experiment says otherwise
+
+
+def test_success_bar_requires_all_three_criteria():
+    from ml.compare_runs import apply_success_bar
+    good = {"distilbert_mae": 10.0, "baseline_mae": 20.0,
+            "distilbert_severe_underprediction_rate": 0.01,
+            "baseline_severe_underprediction_rate": 0.05,
+            "predictor_latency_median_ms": 3.0}
+    assert apply_success_bar(good, 5000.0)["selected_predictor"] == "distilbert"
+    # worse MAE -> baseline
+    assert apply_success_bar({**good, "distilbert_mae": 30.0}, 5000.0)["selected_predictor"] == "baseline"
+    # worse severe-underprediction -> baseline
+    assert apply_success_bar({**good, "distilbert_severe_underprediction_rate": 0.2},
+                             5000.0)["selected_predictor"] == "baseline"
+    # equal severe-underprediction still passes ("beats or ties")
+    assert apply_success_bar({**good, "distilbert_severe_underprediction_rate": 0.05},
+                             5000.0)["selected_predictor"] == "distilbert"
+    # overhead at/over 5% of service time -> baseline
+    assert apply_success_bar({**good, "predictor_latency_median_ms": 300.0},
+                             5000.0)["selected_predictor"] == "baseline"
+    # unknown service time -> cannot assess, never a silent pass
+    r = apply_success_bar(good, None)
+    assert r["selected_predictor"] == "indeterminate" and r["overhead_under_5pct"] is None
+
+
+def test_success_bar_overhead_fraction_is_reported():
+    from ml.compare_runs import apply_success_bar
+    r = apply_success_bar({"distilbert_mae": 1.0, "baseline_mae": 2.0,
+                           "distilbert_severe_underprediction_rate": 0.0,
+                           "baseline_severe_underprediction_rate": 0.0,
+                           "predictor_latency_median_ms": 50.0}, 1000.0)
+    assert r["overhead_fraction"] == pytest.approx(0.05)
+    assert r["overhead_under_5pct"] is False     # strict: must be UNDER 5%
+
+
+def test_label_files_roundtrip_non_ascii_prompts(tmp_path):
+    """Real LMSYS prompts contain non-ASCII text. Without an explicit utf-8 encoding the Windows
+    default (cp1252) raises UnicodeDecodeError and no real label file can be loaded at all."""
+    from ml.data import load_jsonl, save_jsonl
+    tricky = ["Erkläre mir Addition auf Deutsch", "¿Qué es OAuth?", "日本語のプロンプト",
+              "emoji \U0001f600 and curly “quotes”"]
+    recs = [{"id": f"x{i}", "prompt": p, "target_output_tokens": 10.0 + i, "category": "c"}
+            for i, p in enumerate(tricky)]
+    path = tmp_path / "nonascii.jsonl"
+    save_jsonl(recs, path)
+    assert [e["prompt"] for e in load_jsonl(path)] == tricky
+
+    # and the datagen writer's output (ensure_ascii=False) must load too
+    from datagen.jsonl import write_jsonl
+    p2 = tmp_path / "from_datagen.jsonl"
+    write_jsonl(recs, p2)
+    assert [e["prompt"] for e in load_jsonl(p2)] == tricky

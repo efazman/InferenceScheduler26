@@ -1,6 +1,17 @@
 # Project status — real label generation RUNNING
 
-Updated 2026-10-03 ~19:12 local. Machine: Windows 11 Pro 26200, RTX 3060 Ti 8 GB.
+Updated 2026-10-03 ~19:55 local. Machine: Windows 11 Pro 26200, RTX 3060 Ti 8 GB.
+
+**Scope cut 2026-10-04: target reduced 2000 -> 500 prompts** for time budget (16.7 h -> 3.4 h end
+to end). Nothing was restarted or discarded — 500 was already a planned checkpoint, `NUM_PROMPTS`
+stays 2000, and `scripts/stop_at.ps1` stops the run at 500. Resuming to 1000/2000 later is
+`.\scripts
+un_generation.ps1 -Detach`; the extension pass and assembly are both idempotent.
+Cost: a 75-example test set, so the DistilBERT-vs-baseline verdict is statistically thin.
+
+Base run is in flight and untouched. The censored-output extension pass, final-label assembly and
+the Phase 12 experiment harness are built and tested, and all wait on the base run finishing — see
+*Censored-output handling* and *Phase 12 harness* below.
 
 Project context: `General Project Context/adaptive_llm_scheduler_project_context.md`.
 Pipeline docs: `datagen/README.md`, `ml/README.md`. The scheduler itself is not started yet, by design.
@@ -20,7 +31,9 @@ Pipeline docs: `datagen/README.md`, `ml/README.md`. The scheduler itself is not 
 | 9 Real label generation | **RUNNING** — PID in `logs/generation.pid` |
 | 10 Checkpoints | tooling ready; first cut at 250 prompts |
 | 11 Unattended run | **done** — detached, auto-restart, auto-checkpoint |
-| 12 Training on checkpoints | tooling ready and verified on this GPU |
+| 8b Censored-output extension | **built + tested; waits for the base run to finish** |
+| 8c Final-label assembly | **built + tested; waits on the extension pass** |
+| 12 Training on checkpoints | **harness ready** — max_length experiment, learning curve, success bar |
 
 ## Phase 8 decision: MAX_NEW_TOKENS 512 → 1024
 
@@ -133,7 +146,8 @@ dataset size alone. Existing checkpoints are never overwritten.
 
 ## Verified, not assumed
 
-- `pytest`: **71 passed, 0 skipped** (63 pre-existing + 8 new). Baseline before any edit was 63+1 skip.
+- `pytest`: **95 passed, 0 skipped** (see *Test state* below). Baseline before any edit this
+  session was 63 passed + 1 skipped.
 - `ml.train` on CUDA end-to-end; **predictor latency 2.79 ms median on GPU** vs multi-second Llama
   service time — success-bar criterion 3 already met with large margin.
 - Real llama.cpp generation: 40/40 twice, coherent answers, chat template applied.
@@ -161,3 +175,268 @@ No existing behaviour removed. The ML model was not redesigned or tuned.
 ~1,519 chars (~380 tokens), so a meaningful share of prompts will be truncated at the predictor's
 input. That is already flagged `REAL-DATA` in the file. Worth revisiting at Phase 12 — **not**
 changed now, to avoid tuning during the generation run.
+
+---
+
+# Censored-output handling (added while the base run was in flight)
+
+## The problem
+
+A base generation that stopped at `max_new_tokens` carries `finish_reason: "length"`. Its recorded
+length is a **lower bound**, not a measurement — the true length is `>=` the cap. Feeding those
+values into a p90 target teaches the predictor that every long job costs exactly the cap, which
+erases the short-vs-long signal the scheduler exists to exploit.
+
+Live base truncation is settling around **7.5%** of runs. Earlier readings near 16% were
+small-sample noise; `datagen.status` reports the current figure.
+
+## Design: a separate extension pass, never an in-place edit
+
+`datagen.extend_censored` re-runs **only** the capped `(prompt_id, seed)` pairs with
+`EXTENDED_MAX_NEW_TOKENS = 2048` and *nothing else changed* — same prompt text, same seed, same
+temperature, top_p, system prompt. Results go to a **separate directory**. The base files are
+opened read-only and never mutated, so the original 1024 measurements survive exactly as recorded.
+
+- **2048, not 1536** — the context has room. Worst-case prompt is `MAX_PROMPT_CHARS` 8000 chars
+  ≈ 2000 tokens, and 2000 + 2048 = 4048 < 4096. The actual subset maxes at 2,719 chars (~680
+  tokens), so real headroom is far larger. No server restart or context change needed.
+- **Prompt text comes from the subset file** keyed by `prompt_id`, not from a base label record,
+  so a capped run belonging to a not-yet-complete prompt can still be extended and prompt
+  identity is guaranteed to match what the base run was given.
+- **Resumable / idempotent / crash-safe** — every `(prompt_id, seed)` already in
+  `extended_runs.jsonl` is skipped, each line is fsynced on write, and a half-written final line is
+  repaired on start-up. Re-running a completed pass generates nothing.
+- **Refuses to mix settings** — a resume with a different cap is rejected (`ConfigMismatch`), and
+  it will not write into the base directory.
+- **Refuses GPU contention by default** — if `logs/generation.pid` names a live process the pass
+  exits with an explanation instead of competing with the base run for the GPU and distorting the
+  latency it records. `--allow-concurrent-base` overrides, deliberately.
+- **Still censored at 2048 stays censored** — the length is recorded, flagged `still_censored`, and
+  counted. Never replaced by a guess.
+- **Determinism audit** — same prompt + same seed should regenerate the same prefix, so an extended
+  length should be `>=` the base cap. A shorter result means the backend was not deterministic; the
+  summary counts those as `shorter_than_base` rather than hiding them.
+
+## Design: final-label assembly
+
+`datagen.assemble_final_labels` writes a new file and leaves both sources untouched. Per-run
+precedence, applied independently to each generation:
+
+| Base run | Extended run | Effective length | `length_source` | Censored |
+| --- | --- | --- | --- | --- |
+| finished naturally | — | base length | `base` | no |
+| capped | finished naturally | **extended** length | `extended` | no |
+| capped | also hit 2048 | extended length (2048) | `extended` | **yes** |
+| capped | none exists | base length (1024) | `base_censored_unextended` | **yes** |
+
+The p90 is recomputed from the effective lengths with the same `numpy` call the base pipeline
+uses, so the arithmetic is identical and only the inputs improve.
+
+`has_censored_target` is **not** "any run was censored". With 4 runs and linear interpolation the
+p90 sits at sorted index 2.7, so it blends the two largest values — a censored run among the two
+smallest cannot move it. Only a censored value the percentile actually reads sets the flag. Ties
+are handled conservatively, and an unmodelled percentile method falls back to "if any run is
+censored, flag it" rather than assuming this interpolation.
+
+Audit fields on every final record: `n_base_truncated_runs`, `n_extended_runs`,
+`n_still_censored_runs`, `n_unextended_censored_runs`, `has_censored_target`, and
+`base_target_p90_output_tokens` (what the target would have been without the extension), plus
+per-run `base_output_tokens` / `extended_output_tokens` / `effective_output_tokens` /
+`length_source` / `is_censored`.
+
+Prompts with `has_censored_target` are **kept, not dropped** — that is a modelling decision for
+later, and the flag makes it available either way. The assembly summary reports how many there are.
+
+## Paths
+
+```
+data/labels/llama31_8b_q4km/            base run, 1024 cap  — READ-ONLY from here on
+data/labels/llama31_8b_q4km_ext2048/    extended_runs.jsonl, extension_failures.jsonl,
+                                        extension_config.json
+data/labels/llama31_8b_q4km_final/      labels_final.jsonl, assembly.summary.json
+data/labels/llama31_8b_q4km_final/checkpoints/checkpoint_00500/labels_500.jsonl
+```
+
+## Commands, in order, after the base run finishes
+
+```powershell
+# 0. confirm the base run is done and its generator is gone
+.\.venv\Scripts\python.exe -m datagen.status
+Get-Process -Id (Get-Content logs\generation.pid) -ErrorAction SilentlyContinue   # expect nothing
+
+# 1. size the work (read-only, safe at any time)
+.\.venv\Scripts\python.exe -m datagen.extend_censored --backend llamacpp --dry-run
+
+# 2. run the extension pass (needs llama-server up; resume = the same command)
+.\.venv\Scripts\python.exe -m datagen.extend_censored --backend llamacpp
+
+# 3. assemble final labels
+.\.venv\Scripts\python.exe -m datagen.assemble_final_labels
+
+# 4. cut learning-curve checkpoints from the ASSEMBLED labels
+.\.venv\Scripts\python.exe -m datagen.make_checkpoint `
+    --labels data\labels\llama31_8b_q4km_final\labels_final.jsonl `
+    --out-root data\labels\llama31_8b_q4km_final\checkpoints
+```
+
+---
+
+# Phase 12 harness
+
+## Input-length experiment (max_length 128 / 256 / 512)
+
+`max_length = 128` was chosen against the synthetic file. The real subset's p90 prompt is roughly
+380 tokens, so 128 truncates a large share of real prompts before DistilBERT sees them. **The
+default has NOT been changed** — this is a measured decision:
+
+```powershell
+.\scripts\run_maxlen_experiment.ps1 -Labels data\labels\llama31_8b_q4km_final\labels_final.jsonl
+.\scripts\run_maxlen_experiment.ps1 -Labels <file> -Device cpu    # if the GPU is still busy
+```
+
+Only `max_length` varies. Data file, seed, split, optimizer, architecture, loss, epochs and batch
+size are held fixed, so a difference in test MAE is attributable to prompt context length alone.
+No hyperparameter search happens here.
+
+## Learning curve (500 / 1000 / 2000)
+
+```powershell
+.\scripts\run_learning_curve.ps1 -MaxLength <winner from above>
+```
+
+Trains only from **stable** nested checkpoint files, never the growing `labels.jsonl`. Because the
+checkpoints are nested, each larger run genuinely adds data rather than resampling it. Settings are
+identical across sizes, so the curve measures the value of more data and not different training
+choices.
+
+## Epochs / early stopping
+
+`epochs = 3` is kept as the default for the first controlled real-data run. Validation MAE is now
+logged every epoch with a `*best*` / `no gain for N` marker. Early stopping is **opt-in**
+(`--early-stopping --patience N`) and off by default, because a learning-curve or max_length
+comparison needs every variant trained for the same number of epochs. When enabled it restores the
+best-validation-MAE weights. If the real model is clearly underfitting, that gets reported, not
+silently tuned away.
+
+## Success bar
+
+`ml.compare_runs` collates runs and applies all three criteria, reading the **measured** median
+Llama service time from the base run's own `runs.jsonl` rather than a guess:
+
+```powershell
+.\.venv\Scripts\python.exe -m ml.compare_runs artifacts\maxlen_128 artifacts\maxlen_256 artifacts\maxlen_512
+```
+
+Criterion 3 is strict (`< 5%`, not `<=`). A missing input yields `indeterminate`, never a silent
+pass. If DistilBERT loses, the baseline ships through the same `predictor.predict()` interface —
+an acceptable outcome.
+
+## GPU contention
+
+Training must **not** use the GPU while generation does. Both `run_maxlen_experiment.ps1` and the
+extension pass warn or refuse when `logs/generation.pid` is live. Use `-Device cpu` if training
+has to happen first, and note that **CPU predictor latency is not the final number** — criterion 3
+must be re-measured on GPU after generation completes.
+
+---
+
+# Bug found and fixed: label files were unreadable on Windows
+
+`ml/data.py` opened label files without an explicit encoding, so Windows used cp1252 and raised
+`UnicodeDecodeError` on real prompt text. **11 of 98** sampled real labels contain non-ASCII
+characters, so `python -m ml.train --real` would have failed outright on the real dataset. The bug
+was pre-existing and latent: the synthetic file and the earlier smoke checkpoints were pure ASCII.
+
+Fixed by making the read and write explicitly utf-8, matching `datagen.jsonl` which already did.
+`tests/test_pipeline.py::test_label_files_roundtrip_non_ascii_prompts` guards it and was confirmed
+to fail when the fix is reverted. The same explicit encoding was applied to the JSON config
+reads/writes in `make_checkpoint`, `status`, `extend_censored` and `assemble_final_labels`.
+
+---
+
+# Test state
+
+**95 passed, 0 skipped.** 71 before this phase, plus 18 in `tests/test_censored_extension.py`
+(censored detection, selection, identity preservation, resume, idempotence, crash-tail repair,
+config-mismatch refusal, failure logging, p90 contributor logic, precedence, still-censored
+behaviour, audit fields, loader compatibility) and 4 in `tests/test_pipeline.py` (max_length and
+early-stopping knobs, success-bar logic, non-ASCII round-trip) and 2 in `tests/test_datagen.py`
+(idle-aware ETA).
+
+# Files added or changed this phase
+
+| File | Change |
+| --- | --- |
+| `datagen/config.py` | **added** `EXTENDED_MAX_NEW_TOKENS=2048`, extension/final paths, `extension_config()`. `generation_config()` deliberately untouched — adding a key there would make the live run's own config check fail on its next auto-restart. |
+| `datagen/extend_censored.py` | **new** — the extension pass |
+| `datagen/assemble_final_labels.py` | **new** — final-label assembly |
+| `ml/compare_runs.py` | **new** — collation + success bar |
+| `ml/train.py` | `--max-length`, `--early-stopping`, `--patience`; val-MAE best tracking; `run_settings` echoed into `eval_results.json` |
+| `ml/config.py` | `early_stopping*` fields; documented why `max_length` stays 128 for now |
+| `ml/data.py` | **encoding fix** (see above) |
+| `datagen/make_checkpoint.py`, `datagen/status.py` | explicit utf-8 on JSON config IO |
+| `scripts/run_maxlen_experiment.ps1` | **new** |
+| `scripts/run_learning_curve.ps1` | **new** |
+| `tests/test_censored_extension.py` | **new** — 18 tests |
+| `tests/test_pipeline.py` | +4 tests |
+| `.gitignore` | `build/` |
+
+The base generator, its output directory, its seeds, its decoding settings and its
+`max_new_tokens` were **not** touched.
+
+---
+
+# Incident: 80-minute generator stall (operator-caused, data clean)
+
+Recorded here because it is the only hard evidence we have about what starves this pipeline.
+
+Between 2026-10-03 23:53 and 2026-10-04 01:14 UTC the generator sent **no requests** for 80.8
+minutes. Diagnosis, in the order it was established:
+
+- `llama-server` received **zero** requests in that window — its slot-launch log has a gap from
+  minute 88.5 to 169.3 with 10–18 requests/min either side. The server sat idle; the *client* had
+  stopped sending.
+- Not a crash and not a restart: `logs/generation.log` shows a single `generator attempt 1`, and
+  `failures.jsonl` is empty, so it was not an HTTP timeout either (those would have been logged
+  after `REQUEST_TIMEOUT`).
+- The window coincides exactly with **CPU-only** DistilBERT training runs and repeated full test
+  suites executed on this machine.
+
+## No measurement was corrupted
+
+| Check | Before stall (n=532) | After stall (n=47) |
+| --- | --- | --- |
+| ms per output token, median | 13.31 | 13.35 |
+| decode tok/s, median | 75.76 | 75.43 |
+
+Decode speed is flat across all four quartiles of the whole run (75.8 / 75.6 / 75.9 / 75.6 tok/s).
+Client-side request overhead is median 24 ms, p95 64 ms. The stall sat *between* generations, so
+no recorded `latency_ms` spans it. The dataset is unaffected; only wall-clock was lost.
+
+## Operational rule this establishes
+
+**Do not run anything heavy on this box while the base run is live — GPU or not.** The documented
+hazard was GPU contention, but what actually stalled the generator was CPU and disk pressure from
+CPU-only training plus test suites. The generator is a single-threaded Python loop that fsyncs
+after every record; starving it stops the pipeline without raising any error.
+
+Task 8 of the brief permits CPU training if it must happen before generation ends. In practice
+that still cost 1.35 h. Prefer waiting.
+
+## Tooling change this prompted
+
+`datagen.status` previously reported only a whole-run average rate, which a stall depresses
+permanently — it was showing a 28.9 h ETA when the achievable rate implied under 10 h. It now
+reports:
+
+| Field | Meaning |
+| --- | --- |
+| `generations_per_min` | whole-run average, **includes** idle time |
+| `generations_per_min_active` | excludes gaps longer than `IDLE_GAP_S` (120 s) |
+| `generations_per_min_recent` | last `RECENT_WINDOW` (200) generations — **read this one** |
+| `idle_hours` | total time spent in gaps > 120 s |
+| `longest_idle_gap_min` | largest single gap, so a stall is visible |
+| `eta_basis` | which rate the ETA was computed from |
+
+The ETA now uses the recent rate, falling back to active, then overall. Covered by
+`tests/test_datagen.py::test_status_eta_ignores_idle_gaps` and `test_status_without_gaps_reports_no_idle`.

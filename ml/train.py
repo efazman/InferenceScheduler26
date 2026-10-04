@@ -105,12 +105,31 @@ def train(config: Config) -> dict:
                                   weight_decay=config.weight_decay)
 
     history = []
+    best = {"val_mae": float("inf"), "epoch": None, "state": None}
+    stopped_early = False
     for epoch in range(1, config.epochs + 1):
         tr = run_epoch(model, train_loader, config, mse_scale, device, optimizer)
         va = run_epoch(model, val_loader, config, mse_scale, device)
         history.append({"epoch": epoch, "train": tr, "val": va})
+        improved = va["mae"] < best["val_mae"] - config.early_stopping_min_delta
+        if improved:
+            best = {"val_mae": va["mae"], "epoch": epoch,
+                    # cpu copy so the snapshot does not pin VRAM for the rest of training
+                    "state": {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}}
+        since_best = epoch - (best["epoch"] or epoch)
         print(f"epoch {epoch}: train loss={tr['loss']:.4f} (ce={tr['ce']:.3f} mse={tr['mse']:.3f}) "
-              f"mae={tr['mae']:.1f} | val loss={va['loss']:.4f} mae={va['mae']:.1f}")
+              f"mae={tr['mae']:.1f} | val loss={va['loss']:.4f} mae={va['mae']:.1f}"
+              f"{' *best*' if improved else f' (no gain for {since_best})'}")
+        if config.early_stopping and since_best >= config.early_stopping_patience:
+            print(f"early stopping: no val-MAE gain for {since_best} epochs; "
+                  f"restoring epoch {best['epoch']} (val mae={best['val_mae']:.1f})")
+            stopped_early = True
+            break
+
+    # Only restore when early stopping is enabled; a fixed-epoch run must keep its final weights
+    # so that comparisons across dataset sizes differ in data alone.
+    if config.early_stopping and best["state"] is not None:
+        model.load_state_dict({k: v.to(device) for k, v in best["state"].items()})
 
     # --- save + evaluate --------------------------------------------------------
     predictor = LengthPredictor(model, tokenizer, config, boundaries, centers, mse_scale, device)
@@ -122,6 +141,24 @@ def train(config: Config) -> dict:
     results = {
         "data_path": str(data_path),
         "target_field": config.target_field,
+        # Echoed so a learning-curve / max_length comparison is self-describing and auditable.
+        "run_settings": {
+            "max_length": config.max_length,
+            "epochs_configured": config.epochs,
+            "epochs_run": len(history),
+            "early_stopping": config.early_stopping,
+            "early_stopped": stopped_early,
+            "best_val_mae": best["val_mae"] if best["epoch"] else None,
+            "best_epoch": best["epoch"],
+            "batch_size": config.batch_size,
+            "learning_rate": config.learning_rate,
+            "loss_lambda": config.loss_lambda,
+            "pooling": config.pooling,
+            "backbone": config.backbone,
+            "seed": config.seed,
+            "device": str(device),
+            "n_train": len(train_ex), "n_val": len(val_ex), "n_test": len(test_ex),
+        },
         "history": history,
         "val": evaluate_split(predictor, baseline, val_ex, config),
         "test": evaluate_split(predictor, baseline, test_ex, config),
@@ -151,12 +188,20 @@ def main(argv=None):
     parser.add_argument("--pooling", choices=["mean", "cls"], default=defaults.pooling)
     parser.add_argument("--device", default=defaults.device)
     parser.add_argument("--seed", type=int, default=defaults.seed)
+    parser.add_argument("--max-length", type=int, default=defaults.max_length,
+                        help="prompt tokens fed to DistilBERT (the 128/256/512 experiment knob)")
+    parser.add_argument("--early-stopping", action="store_true", default=defaults.early_stopping,
+                        help="stop when val MAE stops improving and restore the best epoch "
+                             "(off by default: controlled comparisons need equal epochs)")
+    parser.add_argument("--patience", type=int, default=defaults.early_stopping_patience,
+                        help="epochs without a val-MAE gain before early stopping")
     args = parser.parse_args(argv)
     config = dataclasses.replace(
         defaults, data_path=args.data, output_dir=args.output_dir, epochs=args.epochs,
         batch_size=args.batch_size, learning_rate=args.lr, loss_lambda=args.loss_lambda,
         pooling=args.pooling, device=args.device, seed=args.seed,
-        prompt_token_counter=args.prompt_token_counter)
+        prompt_token_counter=args.prompt_token_counter, max_length=args.max_length,
+        early_stopping=args.early_stopping, early_stopping_patience=args.patience)
     return train(config)
 
 
