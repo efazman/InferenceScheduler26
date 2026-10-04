@@ -1,214 +1,255 @@
 # Orchestrator — InferenceScheduler26
 
-Current coordination state only. History, designs, rationale and the changelog live in `STATUS.md`.
-Repo: `C:\Users\efazr\Desktop\Mhacks26\InferenceScheduler26` (**not** `~/MHacks26`).
+Cross-machine coordination state. Deep detail on the ML side lives in `STATUS.md`; on the
+scheduler side in `scheduler/README.md`, `ui/README.md` and `docs/` (arriving with the merge).
+
+Repo: `C:\Users\efazr\Desktop\Mhacks26\InferenceScheduler26` (**not** `~/MHacks26`)
+Remote: `https://github.com/efazman/InferenceScheduler26.git`
 
 ```
-STATE              label_generation_running
-SCOPE              TARGET CUT 2000 -> 750 PROMPTS (time budget). Resumable to 2000 later.
+STATE              two workstreams complete, awaiting merge
+ML (GPU machine)   DONE  - DistilBERT selected, all 3 success criteria passed in 9/9 runs
+SCHEDULER (other)  DONE  - 17 commits on origin/feature/scheduler-ui-parallel
+MERGE              VERIFIED CLEAN  (git merge-tree: exit 0, 0 conflicting paths)
 BLOCKERS           none
-NEEDS_HUMAN        no
-NEXT_TRIGGER       auto-stop at 750 prompts -> extension -> assembly -> Phase 12
-ETA_ALL_DONE       ~5.7 h from 2026-10-04T01:48Z  (base 3.3 + ext 1.9 + ML 0.5)
-TESTS              95 passed, 0 skipped
+NEEDS_HUMAN        YES - authorise the merge + push (and confirm the winner, see 7)
+WINNER ARTIFACT    artifacts\maxlen_512   (alternative: artifacts\maxlen_128, see 7)
+TESTS              95 passed locally; +~45 scheduler tests arrive with the merge
 ```
 
 ---
 
-## 1. Live processes — do not kill
+## 1. Repo topology — verified from the remote, not assumed
 
-| What | PID | Verify |
+`git fetch --all` at the time of writing:
+
+| Ref | Head | Age | Contents |
+| --- | --- | --- | --- |
+| `master` (local) | `f4a6923` | — | ML + datagen, **in sync with origin** (0 ahead, 0 behind) |
+| `origin/master` | `f4a6923` | 5 h | same |
+| `origin/feature/scheduler-ui-parallel` | `f9f997a` | minutes | scheduler + UI + Tiger Data |
+
+**Merge base is `f4a6923`** — which *is* the current master head. The other machine branched from
+the finished ML work, so there is no divergence to reconcile: `git rev-list --count $BRANCH..master`
+is **0**. This is a pure additive merge, taken with `--no-ff` to keep it identifiable.
+
+### Uncommitted on this machine (commit before merging)
+
+```
+ M ORCHESTRATOR_UPDATE.md      this file
+ M STATUS.md                   results + determinism finding
+ M datagen/make_checkpoint.py  censored-run counting fix for assembled labels
+?? scripts/watch_for_750.sh    the 750-prompt watch
+```
+
+None of these four is touched by the scheduler branch, so committing them cannot introduce a
+conflict. Everything else from this session is already in `62d88be` and `f4a6923`.
+
+---
+
+## 2. What the other machine built
+
+17 commits, 65 files, **8,747 insertions, 0 deletions**.
+
+| Area | Files | What it is |
 | --- | --- | --- |
-| `llama-server` | **1420** | `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/health` -> 200 |
-| generation runner | **28228** | `Get-Process -Id (Get-Content logs\generation.pid)` |
-| auto-stop watcher | **2592** | `Get-Content logs\stop_at.log -Tail 3` |
+| `scheduler/` | 20 | request model, K=1 engine, FIFO / SEJF / adaptive policies, metrics, clocks, event sinks, manifests, derived MAX_WAIT, workloads, simulator, CLI (`__main__.py`, 524 lines) |
+| `scheduler/tigerdata.py` + `.sql` | 2 | non-blocking Tiger Data event sink, schema, init/check/import, credential guards |
+| `ui/` | 27 | Next.js dashboard — queue reordering, execution timeline, live metrics, replay |
+| `docs/` | 11 | runbook, merge plan, sim results (n=60, n=1000), threshold sweep, demo flow, PM status |
+| `tests/` | 6 | ~45 scheduler tests, `conftest.py` (5 fixtures incl. a fake llama-server), repo-hygiene test |
+| `requirements-tiger.txt` | 1 | `psycopg` for the Tiger sink, deliberately outside `requirements.txt` |
 
-The watcher stops the base run the moment 750 prompts are complete, then leaves `llama-server`
-up for the extension pass. Cancel it with `Stop-Process -Id 2592` to let the run continue to 2000.
+Simulated FIFO / SEJF / adaptive results are in `docs/SIM_RESULTS.md`. The **real** measured run is
+designed to happen on *this* machine after the merge.
 
-Both ALIVE as of this writing. PIDs also on disk: `logs/llama-server.pid`, `logs/generation.pid`.
-
----
-
-## 2. Hard constraints while the base run is live
-
-1. **One generator only.** Two writers would interleave appends into the same JSONL files and
-   corrupt the label set. Before starting anything that generates, confirm PID 28228 is gone.
-2. **Nothing heavy on this box — GPU *or* CPU.** CPU-only training plus test suites already cost a
-   1.35 h generator stall (forensics in `STATUS.md`). The generator is a single-threaded Python
-   loop that fsyncs every record; starving it halts the pipeline with no error raised.
-3. **Do not touch the base run's settings, output dir, seeds, or `max_new_tokens`.** A restart
-   re-validates `datagen/config.py` against the on-disk `generation_config.json`; any mismatch
-   fails every restart with `ConfigMismatch` and silently stops the run.
-4. **`data/labels/llama31_8b_q4km/` is read-only from here on.** Extension output and final labels
-   go to separate directories.
+The brief's "do not implement yet" list (scheduler, Tiger Data, dashboard, frontend) has been
+**superseded by parallel work** — all of it exists. Earlier versions of this file said otherwise;
+that guidance is withdrawn.
 
 ---
 
-## 3. Scope decision: 500 prompts, not 2000
+## 3. Merge risk assessment — evidence, not optimism
 
-The full 2000-prompt plan costs **16.7 h** end to end, which exceeded the available budget. Target
-cut to **500 prompts = 3.4 h**. Measured comparison at 10.81 generations/min:
+| Check | Method | Result |
+| --- | --- | --- |
+| Conflicting paths | `git merge-tree --write-tree --name-only HEAD $BRANCH` | **exit 0, 0 paths** |
+| Do they touch my files? | `git diff --name-only HEAD..$BRANCH -- ml/ datagen/ scripts/ requirements.txt pytest.ini STATUS.md ORCHESTRATOR_UPDATE.md tests/test_{datagen,pipeline,censored_extension}.py` | **empty — none** |
+| `.gitignore` (only shared file) | diffed both sides | theirs is a **strict superset** of mine; `comm -23` shows **zero** of my lines missing |
+| `tests/conftest.py` collision | they add it; do I have one? | **I do not** — no collision |
+| Deletions anywhere | `--stat` | **0 deletions** across all 65 files |
 
-| Target | +generations | base | extension | ML | **total** |
-| --- | --- | --- | --- | --- | --- |
-| **500** | 1,192 | 1.8 h | 1.2 h | 0.4 h | **3.4 h** |
-| 1000 | 3,192 | 4.9 h | 2.3 h | 0.6 h | 7.8 h |
-| 2000 | 7,192 | 11.1 h | 4.6 h | 1.0 h | 16.7 h |
+Their `docs/MERGE_PLAN.md` states 54 added files. That count is **stale** — written at `2e289d9`,
+before the four Tiger Data commits. The real figure is 65 files changed. The plan's *reasoning*
+still holds; only the number is out of date.
 
-**Nothing is discarded and nothing was restarted.** 500 was already a planned checkpoint, the
-subset file is still `subset_2000.jsonl`, and `NUM_PROMPTS` was deliberately left at 2000. Resuming
-to 1000 or 2000 later is `.\scripts
-un_generation.ps1 -Detach` — completed prompts are skipped,
-and both the extension pass and the assembly are idempotent, so a later top-up re-runs cleanly.
+Their plan correctly warns that their dry run covered pushed master only. I re-ran it here against
+local `HEAD`: clean. But my four uncommitted files were not in that tree, so commit them and re-run
+before merging (step 2 below).
 
-**Cost of the cut, stated plainly:** 500 prompts gives a **75-example test set** (350 train / 75 val
-/ 75 test). Severe-underprediction rate moves 1.3 points per single test example, so a 2–3 example
-difference could flip the DistilBERT-vs-baseline verdict. That is enough to choose a predictor and
-proceed to the scheduler; it is thin for a strong accuracy claim. The learning curve degrades to
-two points (250, 500).
+---
 
-## 4. Progress — snapshot, refresh before acting
-
-Taken 2026-10-04 01:45Z. Re-read rather than trusting these numbers:
+## 4. The merge — exact commands
 
 ```powershell
-.\.venv\Scripts\python.exe -m datagen.status
-.\.venv\Scripts\python.exe -m datagen.make_checkpoint --list
-.\.venv\Scripts\python.exe -m datagen.extend_censored --backend llamacpp --dry-run
-Get-Content logs\generation.log -Tail 30 -Wait
+# 0. preserve a rollback point
+git branch backup/gpu-pre-merge
+
+# 1. commit the outstanding GPU-side work (none of it is touched by the branch)
+git add STATUS.md ORCHESTRATOR_UPDATE.md datagen\make_checkpoint.py scripts\watch_for_750.sh
+git commit -m "ML results, determinism finding, checkpoint censoring fix, 750 watch"
+git push origin master
+
+# 2. re-run the dry run against the real tree (exit 0 = clean)
+git fetch origin
+git merge-tree --write-tree --name-only HEAD origin/feature/scheduler-ui-parallel
+
+# 3. merge, keeping the scheduler work as one identifiable merge commit
+git merge --no-ff origin/feature/scheduler-ui-parallel
+
+# 4. verify BOTH workstreams
+.\.venv\Scripts\python.exe -m pytest            # expect 95 ML/datagen + ~45 scheduler
+cd ui; npm install; npm run build; cd ..        # needs Node >= 18.18
+
+# 5. publish
+git push origin master
 ```
 
-| Metric | Value |
-| --- | --- |
-| Prompts complete | **225 / 750** (target cut) |
-| Generations | ~900 / 3,000 |
-| Rate (recent) | ~10.8 / min |
-| ETA to 750 | **~3.3 h** |
-| Failures | **0 attempts, 0 permanent** |
-| Base truncation at 1024 | ~9.5% |
-| Idle so far | 1.35 h (one 80.8-min stall) |
-| Checkpoints cut | none yet; 250, 500 and 750 will all cut |
+Back out with `git merge --abort` mid-merge, or `git reset --hard backup/gpu-pre-merge` if the
+result is wrong and **not yet pushed**. After pushing, fix forward with a new commit.
 
-Read `generations_per_min_recent`, not `generations_per_min` — the latter averages in idle time and
-understates throughput. `eta_basis` reports which rate the ETA used.
-
-Truncation is tracking **~10%**, not the 16% quoted in earlier briefs. At 750 prompts expect
-roughly **310 censored runs** to extend (~1.9 h). They are the *longest* generations in the set and
-rerun at 2048, so wall-clock is well above `count x 13 s`.
+`.gitignore`, if git ever does ask: **keep every line from both sides.** Mine covers `data/`,
+`artifacts/`, `models/`, `vendor/`, `logs/`, `build/`; theirs adds `scheduler_runs/`,
+`data/scheduler/` and credential patterns `*.env`, `.env*`, `tiger-cloud-*credentials*`. Dropping
+either side either leaks credentials or commits a 4.9 GB model.
 
 ---
 
-## 5. Queued pipeline — strict order, after the base run stops
+## 5. What git does NOT carry — the most important operational fact
 
-```powershell
-# 0. confirm done and the generator is gone
-.\.venv\Scripts\python.exe -m datagen.status
-Get-Process -Id (Get-Content logs\generation.pid) -ErrorAction SilentlyContinue   # expect nothing
+These are gitignored, so a `git pull` on any machine gets **none** of them:
 
-# 1. size the extension work (read-only, safe any time)
-.\.venv\Scripts\python.exe -m datagen.extend_censored --backend llamacpp --dry-run
+| Path | Size | Needed by |
+| --- | --- | --- |
+| `artifacts/maxlen_512/` (also `maxlen_128`, `curve*`) | 255 MB each | `--predictor distilbert:...` |
+| `data/labels/llama31_8b_q4km_final/labels_final.jsonl` | 750 labels | retraining, `prompts-from-split` |
+| `data/labels/llama31_8b_q4km/` (runs, labels, checkpoints) | ~100 MB | derived MAX_WAIT, retraining |
+| `data/lmsys/subset_2000.jsonl` | 2,000 prompts | real workloads |
+| `models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` | 4.9 GB | llama-server |
+| `vendor/llama.cpp-b11381-cuda-12.4/` | ~1.2 GB | llama-server |
 
-# 2. extension pass at 2048 (resume = same command; idempotent)
-.\.venv\Scripts\python.exe -m datagen.extend_censored --backend llamacpp
+**No transfer is required.** Their runbook puts the real experiment on *this* machine, and the
+predictor is chosen by a CLI flag (`--predictor distilbert:artifacts\<winner>`) rather than a
+hardcoded path. All six items already exist here. The other machine only needs the simulated
+workloads it already committed under `ui/public/sim/`.
 
-# 3. assemble final labels
-.\.venv\Scripts\python.exe -m datagen.assemble_final_labels
-
-# 4. checkpoints from the ASSEMBLED labels
-.\.venv\Scripts\python.exe -m datagen.make_checkpoint `
-    --labels data\labels\llama31_8b_q4km_final\labels_final.jsonl `
-    --out-root data\labels\llama31_8b_q4km_final\checkpoints
-
-# 5. input-length experiment (GPU now free)
-.\scripts\run_maxlen_experiment.ps1 -Labels data\labels\llama31_8b_q4km_final\labels_final.jsonl
-
-# 6. learning curve at the winning max_length
-.\scripts\run_learning_curve.ps1 -MaxLength <winner>
-
-# 7. success bar
-.\.venv\Scripts\python.exe -m ml.compare_runs artifacts\curve_500 artifacts\curve_1000 artifacts\curve_2000
-```
-
-Recovery, safe from any state (completed work is skipped, never redone):
-
-```powershell
-.\scripts\start_llama_server.ps1 -Background   # only if the server died
-.\scripts\run_generation.ps1 -Detach
-```
-
-**Report after steps 2–3:** base truncation count+rate, extension truncation count+rate, prompts
-affected, prompts still carrying censored values.
-
-Step 2 **refuses to start** while `logs/generation.pid` names a live process
-(`--allow-concurrent-base` overrides, deliberately). Step 5 warns in the same situation.
+If an artifact ever does need to reach another host: copy `artifacts/maxlen_512/` wholesale
+(255 MB, self-contained — see §6) plus `ml/__init__.py`, `ml/predictor.py`, `ml/model.py`,
+`ml/config.py`. CPU `torch` suffices; `sklearn` is only needed for the baseline.
 
 ---
 
-## 6. Artifacts and when they are claimable
+## 6. API contract — verified compatible, not assumed
 
-| Path | Ready |
-| --- | --- |
-| `data/lmsys/subset_2000.jsonl` | ✅ now |
-| `data/labels/llama31_8b_q4km/labels.jsonl` | growing — **do not train on it** |
-| `data/labels/llama31_8b_q4km_ext2048/extended_runs.jsonl` | after step 2 |
-| `data/labels/llama31_8b_q4km_final/labels_final.jsonl` | after step 3 |
-| `.../llama31_8b_q4km_final/checkpoints/checkpoint_00250/labels_250.jsonl` | after step 4 |
-| `.../llama31_8b_q4km_final/checkpoints/checkpoint_00500/labels_500.jsonl` | after step 4 |
-| `.../llama31_8b_q4km_final/checkpoints/checkpoint_00750/labels_750.jsonl` | after step 4 |
-| `artifacts/distilbert_length_predictor/` | ✅ exists but trained on **synthetic** data — metrics meaningless, do not report |
+Their `scheduler/predictors.py` wraps my code. Both sides' real signatures:
 
-Checkpoints are nested (cp500 ⊂ cp1000 ⊂ cp2000), so the learning curve measures dataset size
-alone. Existing checkpoints are never overwritten.
+| They call | My signature | |
+| --- | --- | --- |
+| `LengthPredictor.load(artifacts_dir, device=device)` | `load(cls, out_dir, device: str \| None = None)` | ✅ |
+| `.predict(prompt)` → reads `expected_output_tokens`, `uncertainty` | returns those plus `bin_probabilities`; extras ignored | ✅ |
+| `PromptLengthBaseline.load(dir / "baseline.json", tokenizer)` | `load(cls, path, fallback_tokenizer=None)` | ✅ |
+| `datagen.config` constants, `datagen.backends.OpenAICompatBackend(...)` | unchanged this session | ✅ |
+| `splits.json` with `train/val/test` id lists | written by `ml.train` into every artifact dir | ✅ |
 
----
+**Artifact portability, tested on a simulated fresh host** (copied elsewhere, all network calls
+blocked, `HF_HUB_OFFLINE=1`): loads and predicts fine — it bundles `encoder/` and `tokenizer/`, so
+nothing is fetched at runtime. 3.3 ms on GPU, 11.7–14.5 ms on CPU (0.07% and 0.25–0.31% of the
+4,693 ms median service time).
 
-## 7. Measurement-validity invariants — do not violate
-
-1. 1024 and 2048 measurements are **never silently mixed**. Every final record carries its per-run
-   `length_source` plus both base and extended lengths.
-2. Censoring is **never hidden**. A run still capped at 2048 keeps `still_censored: true`.
-   `has_censored_target` is set only when the p90 *actually reads* a censored value.
-3. Training reads **only stable files**, never the growing `labels.jsonl`.
-4. Controlled comparisons vary **one** thing: the max_length experiment varies max_length only, the
-   learning curve varies size only. Early stopping stays off by default so epoch counts match.
-5. **CPU predictor latency is not final.** Success-bar criterion 3 must be re-measured on GPU after
-   generation completes; `eval_results.json` records the device used.
+Two notes for their side:
+- `config.json` carries `prompt_token_counter = "llamacpp:http://127.0.0.1:8080"`. The DistilBERT
+  predictor **ignores** it (verified with the network blocked). Only `LinearBaselinePredictor`
+  would try to reach it, so the baseline path needs llama-server up or that field changed.
+- `scheduler/config.py` sets `SIM_PREDICTOR_LATENCY_MS = 3.0`. Measured is **2.82 ms** on GPU —
+  close enough that the simulations stand, but worth updating in the real-run report.
 
 ---
 
-## 8. Locked decisions — do not re-litigate
+## 7. The one input the scheduler side needs from me
 
-| Decision | Value |
-| --- | --- |
-| Dataset size | **750 prompts** (cut from 2000 for time); resumable to 1000/2000 later |
-| Base `MAX_NEW_TOKENS` | **1024** — irreversible for this dataset; a change needs a new output dir and a fresh run |
-| `EXTENDED_MAX_NEW_TOKENS` | **2048**, not 1536 (context fits: 2000 + 2048 = 4048 < 4096) |
-| `max_length` default | **still 128**, pending the measured 128/256/512 experiment |
-| `epochs` default | **still 3** for the first controlled run |
-| Early stopping | **opt-in, off by default** |
-| Censored-target prompts | **kept and flagged**, not dropped |
+Their runbook says: *"write down `artifacts\<winner>`; every command below uses it."*
 
-Success bar (unchanged): DistilBERT is selected only if it beats baseline test MAE, beats or ties
-baseline severe-underprediction rate, and keeps inference overhead under 5% of median Llama service
-time. Criterion 3 already measured at ~0.05% on GPU (2.79 ms vs multi-second service time). If
-DistilBERT loses on the others, the baseline ships through the same `predictor.predict()`
-interface — an acceptable outcome, not a failure.
+**Winner: `artifacts\maxlen_512`** — best test MAE (193.1 vs baseline 241.5) and it scaled best
+with data. Use `--predictor distilbert:artifacts\maxlen_512`.
 
----
+**Conservative alternative: `artifacts\maxlen_128`** — 5.7% worse MAE (204.8) but **half the severe
+underprediction** (0.045 vs 0.089), because it systematically over-predicts (+43.2 mean signed
+error). Since underprediction is what causes head-of-line blocking, if the real run shows 512
+hurting tail latency, swap the flag. Both artifacts exist; no retrain needed.
 
-## 9. Do not implement yet
+Success bar, 112 held-out prompts, median service time 4,693 ms:
 
-FIFO / SJF / adaptive scheduler, Tiger Data, dashboard, frontend, EGTP, RAG, K>1 concurrency,
-multi-GPU. All come after the predictor choice is finalised.
+| Criterion | Requirement | Measured (maxlen_512) | |
+| --- | --- | --- | --- |
+| Test MAE | beat baseline | 193.1 vs 241.5 (20% better) | ✅ |
+| Severe underprediction | beat or tie baseline | 0.089 vs 0.143 | ✅ |
+| Overhead | < 5% of median service time | 2.82 ms = **0.06%** | ✅ |
+
+Passed in **all 9** training runs (3 max_lengths + 6 learning-curve points), so the verdict is not
+an artifact of one split or dataset size.
 
 ---
 
-## 10. Open items needing a human
+## 8. Dataset caveats the real-run write-up must carry
 
-1. **Whether to exclude `has_censored_target` prompts from training.** Flag is available on every
-   final record; the decision is open. Count will be in `assembly.summary.json` after step 3.
-2. **Nothing is committed to git.** 11 modified + 6 new files, no commit requested yet.
+1. **Seeds are not reproducible on this backend.** llama-server reuses the KV/prompt cache by
+   default, so the same request is not repeatable: one case recorded as 1024/`length` in the base
+   run deterministically yields 539/`stop` with `cache_prompt: false`. The four runs per prompt are
+   still four real samples, so the p90 target is valid — but do **not** describe the dataset as
+   reproducible. Full evidence in `STATUS.md`.
+2. **That is why the 2048 extension pass was abandoned.** A cache-affected censored generation
+   cannot be uncensored by re-running it. Its 14 records are quarantined under
+   `data/labels/_quarantine/` and never reached a label set.
+3. **9.87% of runs remain right-censored** (296 of 3,000) across 100 of 750 prompts, all flagged
+   `has_censored_target: true`. `target_max` is pinned at 1024.
+4. **Scope is 750 prompts, not 2000** (cut for time). Test set 112 examples — enough to choose a
+   predictor, thin for a strong accuracy claim.
+5. **The learning curve had not flattened** at 750 (MAE 246.7 → 217.2 → 193.1), so more data would
+   likely still help.
 
-Not yet run, so no results exist: the extension pass, final assembly, and any Phase 12 training on
-real labels.
+---
+
+## 9. Ownership, post-merge
+
+| Area | Owner | Notes |
+| --- | --- | --- |
+| `ml/`, `datagen/`, `scripts/`, `requirements.txt`, `pytest.ini` | GPU machine | the scheduler adapts to these, not the reverse |
+| `scheduler/`, `ui/`, `docs/`, `tests/test_scheduler_*`, `requirements-tiger.txt` | other machine | — |
+| `.gitignore`, `tests/conftest.py` | shared | union of both sides, never one side |
+| `STATUS.md` | GPU machine | add a "Scheduler" pointer after merging; don't overwrite ML content |
+| `ORCHESTRATOR_UPDATE.md` | shared coordination | this file |
+
+---
+
+## 10. Optional follow-ups, none blocking
+
+1. **Resume the base run toward 1000/2000** for a stronger curve — unattended,
+   `.\scripts\run_generation.ps1 -Detach`, then re-assemble, re-cut checkpoints with `--force`,
+   retrain. Completed prompts are skipped; prompt 751's banked generation is reused.
+2. **A reproducible dataset** needs `"cache_prompt": false` on every request plus a fresh output
+   directory. `datagen/backends.py` does not set it — deliberately left unmade, since adding it to
+   `generation_config()` would break the existing run's resume check. ~8 h for a clean 750.
+3. `llama-server` PID **1420** is still up (5.2 GB VRAM), kept for the baseline's `/tokenize`. The
+   real scheduler run needs it anyway, so leave it unless you need the VRAM.
+
+---
+
+## 11. Corrections to earlier versions of this file
+
+- The "do not implement yet" list is **withdrawn** — scheduler, Tiger Data, dashboard and UI all
+  exist on the branch.
+- An earlier handoff note offered to add a batched predict call. Unnecessary:
+  **`LengthPredictor.predict_batch(prompts)` already exists** in `ml/predictor.py`.
+- Earlier versions implied there was no git remote and only a 2-commit history. Both wrong: the
+  remote is `efazman/InferenceScheduler26` and master is at `f4a6923` with the ML work committed
+  and pushed.

@@ -5,8 +5,7 @@ Updated 2026-10-03 ~19:55 local. Machine: Windows 11 Pro 26200, RTX 3060 Ti 8 GB
 **Scope cut 2026-10-04: target reduced 2000 -> 500 prompts** for time budget (16.7 h -> 3.4 h end
 to end). Nothing was restarted or discarded — 500 was already a planned checkpoint, `NUM_PROMPTS`
 stays 2000, and `scripts/stop_at.ps1` stops the run at 500. Resuming to 1000/2000 later is
-`.\scripts
-un_generation.ps1 -Detach`; the extension pass and assembly are both idempotent.
+`.\scripts\run_generation.ps1 -Detach`; the extension pass and assembly are both idempotent.
 Cost: a 75-example test set, so the DistilBERT-vs-baseline verdict is statistically thin.
 
 Base run is in flight and untouched. The censored-output extension pass, final-label assembly and
@@ -25,15 +24,15 @@ Pipeline docs: `datagen/README.md`, `ml/README.md`. The scheduler itself is not 
 | 3 LMSYS dataset | **done** — 1M rows → 316,816 clean → 2,000 selected |
 | 4 llama.cpp + CUDA | **done** — prebuilt b11381 CUDA 12.4, 76 tok/s proves offload |
 | 5 Llama 3.1 8B Q4_K_M | **done** — sha256 verified |
-| 6 llama-server | **running** — PID in `logs/llama-server.pid` |
+| 6 llama-server | **running** — PID 1420, kept up for the baseline's Llama tokenizer |
 | 7 Smoke test | **done** — 10 real prompts × 4 seeds, 40/40, twice (512 and 1024) |
 | 8 512-cap decision | **decided: raised to 1024** (see below) |
-| 9 Real label generation | **RUNNING** — PID in `logs/generation.pid` |
-| 10 Checkpoints | tooling ready; first cut at 250 prompts |
+| 9 Real label generation | **done** — 750/750 prompts, 3,000 runs, 0 failures |
+| 10 Checkpoints | **done** - 250 / 500 / 750 cut from assembled labels |
 | 11 Unattended run | **done** — detached, auto-restart, auto-checkpoint |
-| 8b Censored-output extension | **built + tested; waits for the base run to finish** |
-| 8c Final-label assembly | **built + tested; waits on the extension pass** |
-| 12 Training on checkpoints | **harness ready** — max_length experiment, learning curve, success bar |
+| 8b Censored-output extension | **ABANDONED** - premise invalid (prompt-cache nondeterminism); records quarantined |
+| 8c Final-label assembly | **done** - 750 prompts, base-only, censoring flagged |
+| 12 Training on checkpoints | **DONE** — DistilBERT selected, all 3 criteria passed (see RESULTS) |
 
 ## Phase 8 decision: MAX_NEW_TOKENS 512 → 1024
 
@@ -440,3 +439,173 @@ reports:
 
 The ETA now uses the recent rate, falling back to active, then overall. Covered by
 `tests/test_datagen.py::test_status_eta_ignores_idle_gaps` and `test_status_without_gaps_reports_no_idle`.
+
+---
+
+# Finding: llama-server prompt caching breaks per-seed reproducibility
+
+This invalidated the planned 2048 extension pass and is the most important caveat on the dataset.
+
+## What was observed
+
+The extension pass re-ran capped `(prompt_id, seed)` pairs with only `max_new_tokens` raised,
+expecting to reveal each censored generation's true length. Within the first 12 re-runs, **42%
+came back SHORTER than the 1024 base cap** — one at 104 tokens against a base run that had hit
+1024. A re-run cannot be shorter than a cap the original exceeded, so the premise was wrong.
+
+## Root cause, established by test
+
+Picking one censored `(prompt, seed)` and repeating the request:
+
+| Request | Result |
+| --- | --- |
+| cap 1024, seed 42, **default caching**, 3x | 539, 538, 538 tokens — all `stop`, **not reproducible** |
+| cap 1024, seed 42, **`cache_prompt: false`**, 3x | 539, 539, 539 — `stop`, **reproducible** |
+| cap 2048, seed 42, **`cache_prompt: false`**, 2x | 539, 539 — **identical to cap 1024** |
+| what the base run recorded for that same request | **1024 tokens, `length`** |
+
+So with the prompt cache disabled the backend is both deterministic *and* cap-independent — exactly
+what the extension pass assumed. With it enabled (the default, and what the base run used), the
+same request is not reproducible, and in this case differed enormously: 539 and `stop` versus 1024
+and `length`.
+
+The mechanism is visible in the server log: `selected slot by LCP similarity, f_sim_best = 1.000`
+and `making room for prompt cache entry`. With `-np 1`, consecutive requests reuse the slot's KV
+cache. Because the generator runs a prompt's 4 seeds back-to-back, runs 2–4 reuse the cached prompt
+prefix while run 1 evaluates it fresh — so the four "repeats" per prompt are not numerically
+equivalent draws, and the difference is systematic rather than random.
+
+## Consequences
+
+1. **A cache-affected censored generation cannot be uncensored by re-running it.** The extension
+   approach was abandoned. Its 14 records are quarantined under
+   `data/labels/_quarantine/ext2048_INVALID_cache_nondeterminism/` and never reached a label set.
+2. **The "deterministic seed" premise in the project's locked decisions is false on this backend
+   with caching on.** Seeds 42–45 still produced four distinct samples per prompt, so the p90 target
+   remains a valid conservative statistic over four real generations — but those generations are
+   not reproducible, and the dataset should not be described as reproducible.
+3. **The labels remain real measurements from a real serving stack** that had caching enabled,
+   which is also how the scheduler will run. For predicting service cost on this stack that is
+   arguably the more representative choice. It is a defensible dataset, not a clean one.
+4. **9.87% of runs stay right-censored** (296 of 3,000), affecting 100 of 750 prompts, every one of
+   which has `has_censored_target: true` because a run capped at 1024 always lands among the top
+   two values the p90 reads. `target_max` is therefore pinned at 1024.
+
+## What a reproducible rerun would require
+
+Send `"cache_prompt": false` on every request and use a fresh output directory. `datagen/backends.py`
+does not currently set it — that is a deliberate one-line change left unmade, because adding it to
+`generation_config()` would make the existing run's config check fail on its next resume. Cost of a
+clean 750-prompt regeneration at cap 2048 with caching off was estimated at roughly 8 h, versus the
+~2.4 h budget available, so it was not attempted.
+
+---
+
+# RESULTS — Phase 12 on real labels (750 prompts)
+
+All numbers below were measured on this machine. Test set = 112 held-out prompts, stratified by
+category, seed 42. Median Llama service time measured from the base run's own records: **4,693 ms**,
+so the 5% overhead budget is **234.7 ms**.
+
+## Input-length experiment (Task 5) — only `max_length` varied
+
+Same data, seed, split, optimizer, architecture, loss, epochs (3) and batch size throughout.
+
+| max_length | DB MAE | DB p90 abs err | DB under | **DB severe under** | mean signed err | latency |
+| --- | --- | --- | --- | --- | --- | --- |
+| 128 | 204.78 | 410.50 | 0.384 | **0.045** | **+43.2** | 2.79 ms |
+| 256 | 193.61 | 418.47 | 0.446 | 0.080 | +5.0 | 2.81 ms |
+| 512 | **193.14** | 415.20 | 0.420 | 0.089 | +12.8 | 2.84 ms |
+| *baseline* | *241.49* | *483.92* | *0.473* | *0.143* | *−14.0* | — |
+
+**Answer to the question the experiment was built to settle:** longer prompt context gives a real
+but modest MAE gain — 204.8 → 193.1, about 5.7% — and it saturates by 256 (256 vs 512 differ by
+0.5 tokens, which is noise on 112 examples). The prior expectation that 512 would clearly win
+because it truncates fewer real prompts is **only weakly supported**.
+
+The more interesting result is the opposite direction: **128 halves severe underprediction**
+(0.045 vs 0.089) because it systematically over-predicts (+43.2 signed error vs +12.8). Truncating
+the prompt makes the model less certain and therefore more conservative — which is the direction
+this project explicitly prefers. On 112 test examples that is 5 cases vs 10, so it is a small-sample
+difference, but it points the same way as the project's locked "underprediction is more harmful"
+principle.
+
+## Learning curve (Task 6) — only dataset size varied
+
+Checkpoints are nested, so each larger size genuinely adds data.
+
+**max_length 512**
+
+| prompts | n_train | n_test | DB MAE | baseline MAE | DB severe | baseline severe | overhead |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 250 | 175 | 38 | 246.7 | 280.1 | 0.132 | 0.184 | 0.06% |
+| 500 | 350 | 75 | 217.2 | 269.0 | 0.027 | 0.160 | 0.08% |
+| **750** | 525 | 112 | **193.1** | 241.5 | 0.089 | 0.143 | 0.06% |
+
+**max_length 128**
+
+| prompts | n_train | n_test | DB MAE | baseline MAE | DB severe | baseline severe | overhead |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 250 | 175 | 38 | 247.2 | 280.1 | 0.105 | 0.184 | 0.07% |
+| 500 | 350 | 75 | 206.7 | 269.0 | 0.027 | 0.160 | 0.06% |
+| **750** | 525 | 112 | **204.8** | 241.5 | 0.045 | 0.143 | 0.06% |
+
+**More data helps, and the curve has not flattened.** At 512, MAE falls monotonically
+246.7 → 217.2 → 193.1 and was still dropping at 750. At 128 it plateaus after 500
+(206.7 → 204.8), i.e. the longer context is what lets the model exploit extra data. That is a
+concrete argument for resuming the base run toward 1000/2000 if time allows.
+
+Severe-underprediction does **not** move monotonically (0.132 → 0.027 → 0.089 at 512). With test
+sets of 38 / 75 / 112 examples, one example is worth 2.6 / 1.3 / 0.9 points, so that series is
+dominated by noise and should not be read as a trend.
+
+## Success bar (Task 9) — verdict
+
+| Criterion | Requirement | Measured (max_length 512, 750 prompts) | Verdict |
+| --- | --- | --- | --- |
+| 1. Test MAE | beat baseline | **193.1 vs 241.5** (20% better) | ✅ |
+| 2. Severe underprediction | beat or tie baseline | **0.089 vs 0.143** | ✅ |
+| 3. Inference overhead | < 5% of median service time | **2.82 ms / 4,693 ms = 0.06%** | ✅ |
+
+**DistilBERT is selected.** It passed all three criteria in **every one of the 9 training runs**
+(3 max_lengths + 6 learning-curve points), so the verdict is not sensitive to the particular split
+or dataset size.
+
+Criterion 3 passes with roughly an 80x margin, measured on GPU after generation finished — not a
+provisional CPU number.
+
+## Scheduler handoff
+
+```python
+from ml.predictor import LengthPredictor
+predictor = LengthPredictor.load("artifacts/maxlen_512")
+predictor.predict(prompt)
+# {"expected_output_tokens": float, "bin_probabilities": [20 floats], "uncertainty": float}
+```
+
+Verified working, with warm `predict()` latency ~3.3 ms on GPU. Sanity check on the ordering it
+produces:
+
+| prompt | predicted tokens | uncertainty |
+| --- | --- | --- |
+| "Write a 2000 word article about the production process of aspirin." | 766.7 | 2.46 |
+| "My laptop will not boot after a BIOS update, help me fix it" | 580.6 | 2.70 |
+| "What is the capital of France?" | 459.6 | 2.94 |
+| "Summarize this in one line: the cat sat on the mat." | 250.2 | 2.78 |
+
+The long-form request ranks highest and the one-line summary lowest, which is the discrimination
+the scheduler needs. But note the short factual question is estimated at 459.6 tokens with
+near-maximal uncertainty (2.94 against a ceiling of ln 20 ≈ 3.00): with 525 training examples the
+model regresses toward the mean on prompts it is unsure about. The `uncertainty` field exposes
+exactly that, and is available to the scheduler.
+
+## Recommended max_length — a decision, not a measurement
+
+The success bar as written ranks on MAE, which selects **512**, and the learning curve shows 512
+scaling better with additional data. That is the default recommendation and what
+`artifacts/maxlen_512` contains.
+
+If scheduler experiments later show that underprediction is hurting tail latency more than the MAE
+gap helps, **128 is the conservative alternative**: 5.7% worse MAE, half the severe
+underprediction, same negligible overhead. Both artifacts are saved, so switching is a one-line
+path change rather than a retrain.

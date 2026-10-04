@@ -49,9 +49,24 @@ def ordered_labels(labels_path: str | Path, ranks: dict[str, int]) -> tuple[list
     return ordered, unknown
 
 
+def _truncated_runs(rec: dict) -> int:
+    """Censored-run count, for both raw base labels and assembled final labels.
+
+    Base labels (generate_labels) use "n_truncated_runs". Assembled labels
+    (assemble_final_labels) split that into "n_base_truncated_runs" and
+    "n_still_censored_runs"; without this fallback a checkpoint cut from assembled labels would
+    report zero censoring, which is worse than reporting nothing.
+    """
+    if "n_truncated_runs" in rec:
+        return rec["n_truncated_runs"]
+    if "n_still_censored_runs" in rec:
+        return rec["n_still_censored_runs"]
+    return sum(bool(r.get("is_censored")) for r in (rec.get("runs") or ()))
+
+
 def summarize(records: list[dict], target_field: str = config.TARGET_FIELD) -> dict:
     targets = np.asarray([r[target_field] for r in records], dtype=np.float64)
-    truncated_runs = sum(r.get("n_truncated_runs", 0) for r in records)
+    truncated_runs = sum(_truncated_runs(r) for r in records)
     total_runs = sum(len(r.get("runs") or ()) for r in records)
     return {
         "n_prompts": len(records),
@@ -66,7 +81,7 @@ def summarize(records: list[dict], target_field: str = config.TARGET_FIELD) -> d
         "total_runs": total_runs,
         "truncated_runs": truncated_runs,
         "truncated_run_fraction": round(truncated_runs / total_runs, 6) if total_runs else 0.0,
-        "prompts_with_any_truncated_run": sum(bool(r.get("n_truncated_runs")) for r in records),
+        "prompts_with_any_truncated_run": sum(bool(_truncated_runs(r)) for r in records),
     }
 
 
