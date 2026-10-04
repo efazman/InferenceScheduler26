@@ -1,11 +1,11 @@
 # Scheduler & Dashboard: Project Status
 
-*As of 2026-10-03 · scheduler workstream*
+*As of 2026-10-04 · scheduler workstream*
 
-**The scheduler and the demo dashboard are built and work end to end with stand-in parts.** They
+**The scheduler, the demo dashboard and the Tiger Data connection are built and tested.** They
 can switch to the real predictor and the real Llama model as soon as the label run on the GPU
-machine finishes, with no new engineering. One finding needs a decision before the real demo: the
-fairness setting has to be tuned to how busy the system is.
+machine finishes, with no new engineering. The one open setting, the adaptive policy's fairness
+threshold, is now decided (see below).
 
 ## Where things stand
 
@@ -17,10 +17,25 @@ fairness setting has to be tuned to how busy the system is.
 | Demo dashboard | Done | Shows the queue reordering live, side by side for all three policies |
 | Connection to the real Llama model | Built, not yet run | Tested against a stand-in server. The real run needs the GPU machine. |
 | Connection to the real predictor | Built, not yet run | Works with whichever predictor wins (DistilBERT or the simple baseline) |
-| Tiger Data (analytics database) | Done | Connected and tested; the results table is created and empty, waiting for the real runs |
+| Tiger Data (analytics database) | Done, waiting for real data | Connected and tested. The results table exists and is empty until the real runs. |
 
 All of this is on a separate branch, so it can't interfere with the label run on the GPU machine.
-It merges cleanly with the latest main code. 155 automated checks pass.
+It merges cleanly with the latest main code. 185 automated checks pass.
+
+## Tiger Data
+
+| Item | Status |
+| --- | --- |
+| Connection to our Tiger Cloud database (`db-inference`) | **Working.** Verified from the Mac. |
+| Results table (`scheduler_events`) | **Created, and empty.** Real results go in once the GPU runs happen. |
+| Sending results | Two ways: live while each run executes, or uploaded afterwards. Uploading twice never double-counts. |
+| Telling real from test data | Every row is labelled *real*, *mock* or *simulated*, so test data can't pass for results. Only real runs are uploaded by default. |
+| Effect on the demo if the database is down | **None.** Runs never wait on the database, every result is also saved locally, and anything missed can be uploaded later. |
+| Credential safety | The database password is excluded from git and has been checked absent from everything pushed to GitHub. An automated check fails if a password ever gets committed. |
+| Remaining step | Someone copies the credentials file to the GPU machine **by hand** (USB or a password manager, not git or chat). This takes about 5 minutes. |
+
+No test or made-up data was put in the results table. The connection test used a temporary table
+and deleted it afterwards.
 
 ## What the demo shows
 
@@ -76,6 +91,7 @@ used, and the dashboard shows it. Other multipliers (2×, 5×) can be tried late
 | --- | --- | --- |
 | The GPU machine is busy with the label run | Real-model runs, and the merge itself | The label run and predictor training finishing |
 | The branch needs merging on the GPU machine | Real-model runs | The label run finishing; steps are in docs/MERGE_PLAN.md |
+| The GPU machine doesn't have the Tiger Data credentials yet | Sending real results to Tiger Data (not the runs themselves) | Copy the credentials file over by hand |
 
 ## Next steps once the GPU machine is free
 
@@ -84,7 +100,7 @@ used, and the dashboard shows it. Other multipliers (2×, 5×) can be tried late
 3. Take the held-out test prompts the predictor never saw, and run each policy on the same
    prompts in the same order.
 4. Set the maximum wait (see the decision above) and record the runs.
-5. Send the results to Tiger Data (connection already set up and tested).
+5. Send the results to Tiger Data: live during the runs, or uploaded right after. The connection and table are ready.
 6. Demo: the simulation tab for the story, and the recorded tab for the real runs.
 
 ## Risks
