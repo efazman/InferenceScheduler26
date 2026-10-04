@@ -143,7 +143,7 @@ def make_workload(name: str, n: int = 60, seed: int = 42, load: float = 0.95, pr
                   base_overhead_ms: float = config.SIM_BASE_OVERHEAD_MS,
                   ms_per_token: float = config.SIM_MS_PER_TOKEN) -> Workload:
     """Build a named workload. ``n`` sizes the Poisson workloads (bursty uses n as background
-    count plus n//3 burst requests; head_of_line uses max(n//6, 4) short requests)."""
+    count plus n//3 burst requests; head_of_line uses max(n//6, 8) short requests)."""
     sim = {"base_overhead_ms": base_overhead_ms, "ms_per_token": ms_per_token}
     if name == "mostly_short":
         items, params = _poisson(name, 0.2, n, seed, load, prediction_noise, sim)
@@ -152,7 +152,7 @@ def make_workload(name: str, n: int = 60, seed: int = 42, load: float = 0.95, pr
     elif name == "mostly_long":
         items, params = _poisson(name, 0.8, n, seed, load, prediction_noise, sim)
     elif name == "head_of_line":
-        items, params = _head_of_line(name, max(n // 6, 4), seed, prediction_noise)
+        items, params = _head_of_line(name, max(n // 6, 8), seed, prediction_noise)
     elif name == "bursty":
         items, params = _bursty(name, n, max(n // 3, 5), seed, load, prediction_noise, sim)
     else:
@@ -162,14 +162,16 @@ def make_workload(name: str, n: int = 60, seed: int = 42, load: float = 0.95, pr
 
 
 def workload_from_prompts(prompts: list[str], name: str = "real_prompts", mean_interarrival_ms: float = 5000.0,
-                          seed: int = 42) -> Workload:
+                          seed: int = 42, ids: list[str] | None = None) -> Workload:
     """Real prompts with seeded Poisson arrival times, for wall-clock runs against llama.cpp.
-    Lengths are unknown until generated, so the mock fields are left at 0 / -1."""
+    Lengths are unknown until generated, so the mock fields are left at -1. ``ids`` (e.g. the
+    dataset prompt_id) become request IDs so results can be joined back to the labels."""
     rng = random.Random(f"{seed}:{name}")
     t, items = 0.0, []
     for i, p in enumerate(prompts):
+        rid = ids[i] if ids else f"r{i:04d}"
         # size_class None: metrics derive short/long from the measured output length instead.
-        items.append(WorkloadRequest(f"r{i:04d}", p, round(t, 3), None, -1, -1.0, seed=i))
+        items.append(WorkloadRequest(rid, p, round(t, 3), None, -1, -1.0, seed=i))
         t += rng.expovariate(1.0 / mean_interarrival_ms)
     return Workload(name, "real prompts, seeded Poisson arrivals", seed, items,
                     {"mean_interarrival_ms": mean_interarrival_ms}, synthetic=False)

@@ -88,6 +88,56 @@ def cmd_compare(a):
         Path(a.out).with_suffix(".json").write_text(json.dumps(raw, indent=2))
 
 
+def cmd_sweep(a):
+    """Adaptive max-wait threshold x offered load, against FIFO and SEJF on the same workload."""
+    sec = lambda v: "-" if v is None else f"{v / 1000:.1f}"  # noqa: E731
+    lines = [f"> {SIM_WARNING}", "", f"{a.n} requests per run, seed {a.seed}, prediction noise sigma {a.noise}.", "",
+             "| Workload | Load | Policy | Max wait param (s) | Mean (s) | p50 (s) | p95 (s) | p99 (s) | "
+             "Max wait (s) | Short mean (s) |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for name in a.workloads.split(","):
+        for load in (float(x) for x in a.loads.split(",")):
+            wl = make_workload(name, n=a.n, seed=a.seed, load=load, prediction_noise=a.noise)
+            rows = [("FIFO", None, simulate(wl, "fifo", emit_queue_snapshots=False).summary),
+                    ("SEJF", None, simulate(wl, "sejf", emit_queue_snapshots=False).summary)]
+            rows += [("Adaptive", mw, simulate(wl, "adaptive", mw, emit_queue_snapshots=False).summary)
+                     for mw in (float(x) * 1000 for x in a.max_waits_s.split(","))]
+            for pol, mw, r in rows:
+                lines.append(f"| {name} | {load} | {pol} | {'-' if mw is None else f'{mw / 1000:g}'} | "
+                             f"{sec(r['mean_latency_ms'])} | {sec(r['p50_latency_ms'])} | {sec(r['p95_latency_ms'])} | "
+                             f"{sec(r['p99_latency_ms'])} | {sec(r['max_queue_wait_ms'])} | "
+                             f"{sec(r['short_mean_latency_ms'])} |")
+    text = "\n".join(lines)
+    print(text)
+    if a.out:
+        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.out).write_text(text + "\n")
+
+
+def cmd_prompts_from_split(a):
+    """Held-out prompts for real scheduler runs: the given split of a trained predictor's data.
+
+    Uses the predictor's own artifacts (config.json -> label file, splits.json -> ids), so the
+    scheduler is evaluated on prompts the predictor never trained on."""
+    from ml.config import Config
+    from ml.data import load_jsonl
+
+    art = Path(a.artifacts)
+    cfg = Config.load(art / "config.json")
+    ids = json.loads((art / "splits.json").read_text(encoding="utf-8"))[a.split]
+    by_id = {ex["id"]: ex for ex in load_jsonl(a.labels or cfg.data_path, cfg.target_field)}
+    missing = [i for i in ids if i not in by_id]
+    if missing:
+        sys.exit(f"{len(missing)} {a.split} ids not in the label file; pass --labels <file used for training>")
+    out = Path(a.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8") as f:
+        for i in ids:
+            ex = by_id[i]
+            f.write(json.dumps({"prompt_id": i, "prompt": ex["prompt"], "category": ex.get("category"),
+                                "label_target_tokens": ex["target_output_tokens"]}, ensure_ascii=False) + "\n")
+    print(f"wrote {len(ids)} {a.split}-split prompts to {out}")
+
+
 _COMPACT_KEYS = ("event_type", "timestamp_ms", "seq", "request_id", "queue_depth", "predicted_output_tokens",
                  "actual_output_tokens", "queue_wait_ms", "service_time_ms", "end_to_end_latency_ms", "success",
                  "error", "data")
@@ -120,9 +170,12 @@ def cmd_export_ui(a):
 def cmd_run(a):
     """Wall-clock run: replays arrivals in real time against a real (or realtime-mock) backend."""
     if a.prompts_file:
-        prompts = [json.loads(l)["prompt"] for l in Path(a.prompts_file).read_text(encoding="utf-8").splitlines()
-                   if l.strip()][: a.limit]
-        wl = workload_from_prompts(prompts, mean_interarrival_ms=a.mean_interarrival_ms, seed=a.seed)
+        rows = [json.loads(l) for l in Path(a.prompts_file).read_text(encoding="utf-8").splitlines() if l.strip()]
+        rows = rows[: a.limit]
+        ids = [r.get("prompt_id") for r in rows]
+        wl = workload_from_prompts([r["prompt"] for r in rows], name=Path(a.prompts_file).stem,
+                                   mean_interarrival_ms=a.mean_interarrival_ms, seed=a.seed,
+                                   ids=ids if all(ids) and len(set(ids)) == len(ids) else None)
     else:
         wl = make_workload(a.workload, n=a.n, seed=a.seed, load=a.load, prediction_noise=a.noise)
 
@@ -192,6 +245,21 @@ def main(argv=None):
     p.add_argument("--workloads", default="all", help="comma list or 'all'")
     p.add_argument("--out", default=None, help="write the markdown table here (+ .json)")
     p.set_defaults(fn=cmd_compare)
+
+    p = sub.add_parser("sweep", help="adaptive max-wait threshold x load sweep")
+    common(p, n_default=1000)
+    p.add_argument("--workloads", default="mostly_short,balanced")
+    p.add_argument("--loads", default="0.7,0.85,0.95")
+    p.add_argument("--max-waits-s", default="15,30,60,120")
+    p.add_argument("--out", default=None)
+    p.set_defaults(fn=cmd_sweep)
+
+    p = sub.add_parser("prompts-from-split", help="held-out prompts for real runs, from predictor artifacts")
+    p.add_argument("--artifacts", required=True, help="trained predictor dir (has config.json, splits.json)")
+    p.add_argument("--split", default="test", choices=["train", "val", "test"])
+    p.add_argument("--labels", default=None, help="override the label file recorded in config.json")
+    p.add_argument("--out", required=True)
+    p.set_defaults(fn=cmd_prompts_from_split)
 
     p = sub.add_parser("export-ui", help="write simulated runs for the dashboard")
     common(p, n_default=30)

@@ -1,9 +1,6 @@
 """Engine behaviour: K=1, non-preemption, arrivals during service, starvation, failures, events."""
 
-import json
 import math
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import numpy as np
 import pytest
@@ -230,37 +227,10 @@ def test_normalize_prediction_accepts_extra_keys_and_rejects_bad_output():
             normalize_prediction(bad)
 
 
-class _FakeLlama(BaseHTTPRequestHandler):
-    def log_message(self, *a):
-        pass
-
-    def do_GET(self):
-        self._send({"data": [{"id": "fake"}]})
-
-    def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        n = 7 + body["seed"]
-        self._send({"choices": [{"message": {"content": "x"}, "finish_reason": "stop"}],
-                    "usage": {"prompt_tokens": 5, "completion_tokens": n}})
-
-    def _send(self, body):
-        data = json.dumps(body).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-
-def test_llamacpp_backend_drives_engine_against_fake_server():
-    server = HTTPServer(("127.0.0.1", 0), _FakeLlama)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        backend = LlamaCppBackend(f"http://127.0.0.1:{server.server_address[1]}", timeout_s=5)
-        backend.check()
-        reqs = [Request("a", "hello", 0, seed=1), Request("b", "write an essay", 0, seed=2)]
-        done = {r.request_id: r for r in SchedulerEngine(MockPredictor(), backend, SEJFPolicy(),
-                                                          clock=WallClock()).run(reqs)}
-        assert done["a"].actual_output_tokens == 8 and done["b"].actual_output_tokens == 9
-    finally:
-        server.shutdown()
+def test_llamacpp_backend_drives_engine_against_fake_server(fake_llama_url):
+    backend = LlamaCppBackend(fake_llama_url, timeout_s=5)
+    backend.check()
+    reqs = [Request("a", "hello", 0, seed=1), Request("b", "write an essay", 0, seed=2)]
+    done = {r.request_id: r for r in SchedulerEngine(MockPredictor(), backend, SEJFPolicy(),
+                                                      clock=WallClock()).run(reqs)}
+    assert done["a"].actual_output_tokens == 8 and done["b"].actual_output_tokens == 9

@@ -1,6 +1,7 @@
 """Workloads, simulator, comparison and CLI (all synthetic; no real model or backend)."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -102,3 +103,51 @@ def test_cli_run_mock_realtime(tmp_path, capsys):
     assert meta["summary"]["n_completed"] == 12 and "MOCK" in meta["warning"]
     events = read_events(tmp_path / "demo" / "events.jsonl")
     assert events[0]["simulated"] is False  # wall clock, not the virtual one
+
+
+def test_cli_sweep(tmp_path, capsys):
+    cli(["sweep", "--n", "40", "--workloads", "balanced", "--loads", "0.8", "--max-waits-s", "15,60",
+         "--out", str(tmp_path / "sweep.md")])
+    rows = [l for l in (tmp_path / "sweep.md").read_text().splitlines() if l.startswith("| balanced")]
+    assert [r.split("|")[3].strip() for r in rows] == ["FIFO", "SEJF", "Adaptive", "Adaptive"]
+
+
+def test_prompts_from_split_uses_held_out_ids(tmp_path, capsys):
+    from ml.config import Config
+
+    labels = tmp_path / "labels.jsonl"
+    labels.write_text("".join(json.dumps({"prompt_id": f"p{i}", "prompt": f"prompt {i}", "category": "x",
+                                          "target_p90_output_tokens": 10.0 * i}) + "\n" for i in range(6)))
+    art = tmp_path / "art"
+    art.mkdir()
+    Config(data_path=str(labels), target_field="target_p90_output_tokens").save(art / "config.json")
+    (art / "splits.json").write_text(json.dumps({"train": ["p0", "p1", "p2", "p3"], "val": ["p4"], "test": ["p5"]}))
+    out = tmp_path / "test_prompts.jsonl"
+    cli(["prompts-from-split", "--artifacts", str(art), "--out", str(out)])
+    rows = [json.loads(l) for l in out.read_text().splitlines()]
+    assert rows == [{"prompt_id": "p5", "prompt": "prompt 5", "category": "x", "label_target_tokens": 50.0}]
+
+
+def test_cli_run_real_backend_path_with_prompt_file(tmp_path, capsys, fake_llama_url):
+    prompts = tmp_path / "p.jsonl"
+    prompts.write_text("".join(json.dumps({"prompt_id": f"lmsys-{i}", "prompt": f"question {i}"}) + "\n"
+                               for i in range(3)))
+    cli(["run", "--backend", "llamacpp", "--url", fake_llama_url, "--policy", "adaptive",
+         "--prompts-file", str(prompts), "--mean-interarrival-ms", "5", "--runs-dir", str(tmp_path),
+         "--run-name", "real"])
+    meta = json.loads((tmp_path / "real" / "summary.json").read_text())
+    assert meta["summary"]["n_completed"] == 3 and "warning" not in meta
+    done = [e for e in read_events(tmp_path / "real" / "events.jsonl") if e["event_type"] == "inference_completed"]
+    assert {e["request_id"] for e in done} == {"lmsys-0", "lmsys-1", "lmsys-2"}  # dataset ids kept
+
+
+ARTIFACTS = Path(__file__).resolve().parent.parent / "artifacts" / "distilbert_length_predictor"
+
+
+@pytest.mark.skipif(not (ARTIFACTS / "head.pt").exists(), reason="no local predictor artifacts")
+def test_real_predictor_adapters_load_local_artifacts():
+    from scheduler.predictors import load_predictor, normalize_prediction
+
+    for spec in (f"distilbert:{ARTIFACTS}", f"baseline:{ARTIFACTS}"):
+        expected, _ = normalize_prediction(load_predictor(spec).predict("How do I reset my VPN password?"))
+        assert expected >= 0
