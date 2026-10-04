@@ -132,24 +132,38 @@ class FanoutSink:
             s.close()
 
 
+TIGER_COLUMNS = ("timestamp", "engine_time_ms", "seq", "run_id", "manifest_id", "event_type", "request_id",
+                 "policy", "queue_depth", "predicted_output_tokens", "uncertainty", "actual_output_tokens",
+                 "queue_wait_ms", "service_time_ms", "end_to_end_latency_ms", "workload_name", "backend",
+                 "predictor", "simulated", "success", "failure_reason", "data")
+
+
+def tiger_row(event: dict, manifest_id: str | None = None) -> dict:
+    """Map one event (Event.to_dict() or a JSONL line) to a scheduler_events row
+    (scheduler/tigerdata_schema.sql). ``manifest_id`` comes from the run's run_started event."""
+    return {
+        "timestamp": event.get("wall_time"), "engine_time_ms": event["timestamp_ms"], "seq": event["seq"],
+        "run_id": event.get("run_id"), "manifest_id": manifest_id, "event_type": event["event_type"],
+        "request_id": event.get("request_id"), "policy": event.get("scheduler_policy"),
+        "queue_depth": event.get("queue_depth"), "predicted_output_tokens": event.get("predicted_output_tokens"),
+        "uncertainty": event.get("uncertainty"), "actual_output_tokens": event.get("actual_output_tokens"),
+        "queue_wait_ms": event.get("queue_wait_ms"), "service_time_ms": event.get("service_time_ms"),
+        "end_to_end_latency_ms": event.get("end_to_end_latency_ms"), "workload_name": event.get("workload_name"),
+        "backend": event.get("backend"), "predictor": event.get("predictor"), "simulated": event.get("simulated"),
+        "success": event.get("success"), "failure_reason": event.get("error"), "data": event.get("data") or {},
+    }
+
+
 class TigerDataEventSink:
-    """INTEGRATION POINT - not implemented yet (no credentials / schema decided).
+    """INTEGRATION POINT - not implemented (no credentials yet). Local JSONL never depends on it.
 
-    Tiger Data is PostgreSQL + TimescaleDB, so the expected implementation is a psycopg
-    connection that batches ``Event.to_dict()`` rows into a hypertable keyed on wall_time, e.g.:
-
-        CREATE TABLE scheduler_events (
-            wall_time timestamptz NOT NULL, timestamp_ms double precision, seq int,
-            run_id text, workload_name text, scheduler_policy text, backend text, predictor text,
-            simulated boolean, event_type text, request_id text, queue_depth int,
-            predicted_output_tokens double precision, uncertainty double precision,
-            actual_output_tokens int, queue_wait_ms double precision, service_time_ms double precision,
-            end_to_end_latency_ms double precision, success boolean, error text, data jsonb);
-        SELECT create_hypertable('scheduler_events', 'wall_time');
-
-    Use it through FanoutSink(LocalJsonlEventSink(...), TigerDataEventSink(...)) so the local log
-    stays the source of truth if the database is unreachable. Credentials come from the
-    environment (e.g. TIGER_DATA_DSN); none are stored in the repo.
+    Tiger Data is PostgreSQL + TimescaleDB. The table is in scheduler/tigerdata_schema.sql, and
+    tiger_row() already maps events to its columns, so the remaining work is a psycopg connection
+    from TIGER_DATA_DSN that buffers tiger_row(event.to_dict(), manifest_id) rows and inserts them
+    in batches (flushing on close). Wire it as
+    FanoutSink(LocalJsonlEventSink(...), TigerDataEventSink(...)) in scheduler/__main__.py
+    cmd_run, so the local log stays the source of truth and a database outage can't break a run.
+    Never store credentials in the repo.
     """
 
     def __init__(self, dsn: str | None = None):
