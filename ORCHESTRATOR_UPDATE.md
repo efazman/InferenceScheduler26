@@ -1,255 +1,181 @@
 # Orchestrator — InferenceScheduler26
 
-Cross-machine coordination state. Deep detail on the ML side lives in `STATUS.md`; on the
-scheduler side in `scheduler/README.md`, `ui/README.md` and `docs/` (arriving with the merge).
+Post-integration state. ML detail in `STATUS.md`; scheduler detail in `scheduler/README.md`,
+`ui/README.md`, `docs/`. Measured results in `docs/REAL_RESULTS.md` and `STATUS.md`.
 
 Repo: `C:\Users\efazr\Desktop\Mhacks26\InferenceScheduler26` (**not** `~/MHacks26`)
 Remote: `https://github.com/efazman/InferenceScheduler26.git`
 
 ```
-STATE              two workstreams complete, awaiting merge
-ML (GPU machine)   DONE  - DistilBERT selected, all 3 success criteria passed in 9/9 runs
-SCHEDULER (other)  DONE  - 17 commits on origin/feature/scheduler-ui-parallel
-MERGE              VERIFIED CLEAN  (git merge-tree: exit 0, 0 conflicting paths)
+STATE              INTEGRATED - real end-to-end experiment measured
+MERGE              ab52ef9  (--no-ff, 0 conflicts, 65 files, 8747 insertions, 0 deletions)
+HEAD               7243e9b  master == origin/master, tree clean
+TESTS              185 passed, 1 skipped
+FRONTEND           builds clean, serving real runs
+TIGER DATA         2694 rows, all measurement=real
 BLOCKERS           none
-NEEDS_HUMAN        YES - authorise the merge + push (and confirm the winner, see 7)
-WINNER ARTIFACT    artifacts\maxlen_512   (alternative: artifacts\maxlen_128, see 7)
-TESTS              95 passed locally; +~45 scheduler tests arrive with the merge
+NEEDS_HUMAN        visual dashboard check (~5 min) + record the demo
+DEMO CAVEAT        the scripted "Adaptive = best of both" beat is NOT what the data shows - see 4
 ```
 
 ---
 
-## 1. Repo topology — verified from the remote, not assumed
+## 1. What is done
 
-`git fetch --all` at the time of writing:
+| Phase | Result |
+| --- | --- |
+| Preserve GPU work | `backup/gpu-pre-merge` at `f4a6923`; committed `960a572`; pushed |
+| Fetch Mac branch | tip **`f9f997a`**, confirmed current by fetch |
+| Independent dry run | `merge-tree` vs the *new* HEAD `960a572`: **exit 0, 0 conflicting paths** |
+| Merge | **`ab52ef9`**, `--no-ff` |
+| Python tests | **185 passed, 1 skipped** (skip = Tiger live test behind `TIGER_INTEGRATION=1`) |
+| Frontend build | clean — Next.js 16.3.8, TypeScript clean, node v24.19.0 |
+| Real predictor | `distilbert:artifacts\maxlen_512` via `DistilBertPredictor`, **3.06 ms** |
+| llama-server | healthy, `total_slots: 1` (**K=1**), build `b11381-836d57176` |
+| Derived MAX_WAIT | **14,079 ms** = 3.0 × median service 4,693 ms (n=3001) |
+| Real experiments | 4 runs × 112 requests, **0 failures**, manifest `dc37a5a86f129b1e` |
+| Tiger Data | **2,694 rows, all `measurement=real`**, import idempotent |
+| Dashboard | serving real runs; `/api/tiger` returns metrics matching local summaries |
 
-| Ref | Head | Age | Contents |
-| --- | --- | --- | --- |
-| `master` (local) | `f4a6923` | — | ML + datagen, **in sync with origin** (0 ahead, 0 behind) |
-| `origin/master` | `f4a6923` | 5 h | same |
-| `origin/feature/scheduler-ui-parallel` | `f9f997a` | minutes | scheduler + UI + Tiger Data |
-
-**Merge base is `f4a6923`** — which *is* the current master head. The other machine branched from
-the finished ML work, so there is no divergence to reconcile: `git rev-list --count $BRANCH..master`
-is **0**. This is a pure additive merge, taken with `--no-ff` to keep it identifiable.
-
-### Uncommitted on this machine (commit before merging)
-
-```
- M ORCHESTRATOR_UPDATE.md      this file
- M STATUS.md                   results + determinism finding
- M datagen/make_checkpoint.py  censored-run counting fix for assembled labels
-?? scripts/watch_for_750.sh    the 750-prompt watch
-```
-
-None of these four is touched by the scheduler branch, so committing them cannot introduce a
-conflict. Everything else from this session is already in `62d88be` and `f4a6923`.
+Commit chain: `f4a6923` → `960a572` (ML) → `ab52ef9` (merge) → `0d5e450` (drivers + results)
+→ `324a9bc` (`.sh` line endings) → `7243e9b` (real results + finding).
 
 ---
 
-## 2. What the other machine built
+## 2. Live processes
 
-17 commits, 65 files, **8,747 insertions, 0 deletions**.
-
-| Area | Files | What it is |
+| What | PID | Note |
 | --- | --- | --- |
-| `scheduler/` | 20 | request model, K=1 engine, FIFO / SEJF / adaptive policies, metrics, clocks, event sinks, manifests, derived MAX_WAIT, workloads, simulator, CLI (`__main__.py`, 524 lines) |
-| `scheduler/tigerdata.py` + `.sql` | 2 | non-blocking Tiger Data event sink, schema, init/check/import, credential guards |
-| `ui/` | 27 | Next.js dashboard — queue reordering, execution timeline, live metrics, replay |
-| `docs/` | 11 | runbook, merge plan, sim results (n=60, n=1000), threshold sweep, demo flow, PM status |
-| `tests/` | 6 | ~45 scheduler tests, `conftest.py` (5 fixtures incl. a fake llama-server), repo-hygiene test |
-| `requirements-tiger.txt` | 1 | `psycopg` for the Tiger sink, deliberately outside `requirements.txt` |
+| `llama-server` | **1420** | keep for any further real runs and for the baseline's `/tokenize` |
+| dashboard (`next start`) | **33060** | http://localhost:3000 |
 
-Simulated FIFO / SEJF / adaptive results are in `docs/SIM_RESULTS.md`. The **real** measured run is
-designed to happen on *this* machine after the merge.
-
-The brief's "do not implement yet" list (scheduler, Tiger Data, dashboard, frontend) has been
-**superseded by parallel work** — all of it exists. Earlier versions of this file said otherwise;
-that guidance is withdrawn.
+Nothing is generating. Stop either with `Stop-Process -Id <pid>`.
 
 ---
 
-## 3. Merge risk assessment — evidence, not optimism
+## 3. Real measured results
 
-| Check | Method | Result |
-| --- | --- | --- |
-| Conflicting paths | `git merge-tree --write-tree --name-only HEAD $BRANCH` | **exit 0, 0 paths** |
-| Do they touch my files? | `git diff --name-only HEAD..$BRANCH -- ml/ datagen/ scripts/ requirements.txt pytest.ini STATUS.md ORCHESTRATOR_UPDATE.md tests/test_{datagen,pipeline,censored_extension}.py` | **empty — none** |
-| `.gitignore` (only shared file) | diffed both sides | theirs is a **strict superset** of mine; `comm -23` shows **zero** of my lines missing |
-| `tests/conftest.py` collision | they add it; do I have one? | **I do not** — no collision |
-| Deletions anywhere | `--stat` | **0 deletions** across all 65 files |
+112 held-out test-split prompts, one frozen manifest, real predictor, real Llama 3.1 8B Q4_K_M,
+K=1. `python -m scheduler report` validated same manifest, backend, generation settings, threshold,
+request set, arrival times and **predictor output to 0.0000 tokens** before comparing — only
+execution order differed.
 
-Their `docs/MERGE_PLAN.md` states 54 added files. That count is **stale** — written at `2e289d9`,
-before the four Tiger Data commits. The real figure is 65 files changed. The plan's *reasoning*
-still holds; only the number is out of date.
+| Metric | FIFO | SEJF | Adaptive 3× | Adaptive 5× |
+| --- | --- | --- | --- | --- |
+| Mean latency (s) | 16.65 | **13.36** | 15.75 | 16.34 |
+| p50 latency (s) | 12.27 | **8.78** | 10.62 | 10.58 |
+| p95 latency (s) | 48.70 | 51.65 | **44.18** | 46.20 |
+| p99 latency (s) | 57.76 | 80.56 | **51.80** | 53.71 |
+| Mean queue wait (s) | 10.81 | **7.66** | 10.13 | 10.62 |
+| Max queue wait (s) | 54.75 | 72.17 | **48.78** | 50.82 |
+| Short-req mean latency (s) | 14.02 | **7.03** | 13.66 | 14.23 |
+| Long-req mean latency (s) | 18.23 | 17.45 | **17.11** | 17.70 |
+| Long-req max wait (s) | 54.32 | 72.17 | **48.37** | 50.34 |
+| Throughput (req/min) | 7.94 | 7.94 | 7.95 | 7.92 |
+| Starved, own threshold | 28 | 18 | 35 | 25 |
 
-Their plan correctly warns that their dry run covered pushed master only. I re-ran it here against
-local `HEAD`: clean. But my four uncommitted files were not in that tree, so commit them and re-run
-before merging (step 2 below).
+Per-run thresholds differ (14.08 s for the first three, 23.47 s for 5×), so **own-threshold
+starvation counts are not comparable.** Recomputed from raw queue waits at a common threshold:
 
----
+| Starved at | FIFO | SEJF | Adaptive 3× | Adaptive 5× |
+| --- | --- | --- | --- | --- |
+| > 14.08 s | 28 | **18** | 35 | 34 |
+| > 23.47 s | 19 | **9** | 20 | 25 |
 
-## 4. The merge — exact commands
-
-```powershell
-# 0. preserve a rollback point
-git branch backup/gpu-pre-merge
-
-# 1. commit the outstanding GPU-side work (none of it is touched by the branch)
-git add STATUS.md ORCHESTRATOR_UPDATE.md datagen\make_checkpoint.py scripts\watch_for_750.sh
-git commit -m "ML results, determinism finding, checkpoint censoring fix, 750 watch"
-git push origin master
-
-# 2. re-run the dry run against the real tree (exit 0 = clean)
-git fetch origin
-git merge-tree --write-tree --name-only HEAD origin/feature/scheduler-ui-parallel
-
-# 3. merge, keeping the scheduler work as one identifiable merge commit
-git merge --no-ff origin/feature/scheduler-ui-parallel
-
-# 4. verify BOTH workstreams
-.\.venv\Scripts\python.exe -m pytest            # expect 95 ML/datagen + ~45 scheduler
-cd ui; npm install; npm run build; cd ..        # needs Node >= 18.18
-
-# 5. publish
-git push origin master
-```
-
-Back out with `git merge --abort` mid-merge, or `git reset --hard backup/gpu-pre-merge` if the
-result is wrong and **not yet pushed**. After pushing, fix forward with a new commit.
-
-`.gitignore`, if git ever does ask: **keep every line from both sides.** Mine covers `data/`,
-`artifacts/`, `models/`, `vendor/`, `logs/`, `build/`; theirs adds `scheduler_runs/`,
-`data/scheduler/` and credential patterns `*.env`, `.env*`, `tiger-cloud-*credentials*`. Dropping
-either side either leaks credentials or commits a 4.9 GB model.
+**Throughput is flat at ~7.94 req/min across all four.** Expected at K=1 with no preemption —
+reordering cannot create decode capacity. **No throughput improvement is claimed**; it is a sanity
+check that no run stalled.
 
 ---
 
-## 5. What git does NOT carry — the most important operational fact
+## 4. The demo script needs one beat reframed
 
-These are gitignored, so a `git pull` on any machine gets **none** of them:
+`docs/RUNBOOK_REAL_EXPERIMENT.md` §17 beat 5 says Adaptive gives "short-job preference, with
+overdue requests served oldest-first, so waits are bounded". **The measured data supports the
+second half only.**
 
-| Path | Size | Needed by |
-| --- | --- | --- |
-| `artifacts/maxlen_512/` (also `maxlen_128`, `curve*`) | 255 MB each | `--predictor distilbert:...` |
-| `data/labels/llama31_8b_q4km_final/labels_final.jsonl` | 750 labels | retraining, `prompts-from-split` |
-| `data/labels/llama31_8b_q4km/` (runs, labels, checkpoints) | ~100 MB | derived MAX_WAIT, retraining |
-| `data/lmsys/subset_2000.jsonl` | 2,000 prompts | real workloads |
-| `models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` | 4.9 GB | llama-server |
-| `vendor/llama.cpp-b11381-cuda-12.4/` | ~1.2 GB | llama-server |
+Adaptive is best of all four on **every** tail metric — p95, p99, max queue wait, long-request max
+wait — beating both FIFO *and* SEJF. But its short-request latency (13.66 s) is only 2.6% better
+than FIFO, against SEJF's 7.03 s. It does not retain SEJF's short-job win.
 
-**No transfer is required.** Their runbook puts the real experiment on *this* machine, and the
-predictor is chosen by a CLI flag (`--predictor distilbert:artifacts\<winner>`) rather than a
-hardcoded path. All six items already exist here. The other machine only needs the simulated
-workloads it already committed under `ui/public/sim/`.
+**This is not a bug and not a threshold-tuning problem.** Both were checked:
 
-If an artifact ever does need to reach another host: copy `artifacts/maxlen_512/` wholesale
-(255 MB, self-contained — see §6) plus `ml/__init__.py`, `ml/predictor.py`, `ml/model.py`,
-`ml/config.py`. CPU `torch` suffices; `sklearn` is only needed for the baseline.
+- The policy is implemented correctly: overdue oldest-first, then SEJF among the rest.
+- It is **not** running in FIFO mode. By its own selection reasons it chose by shortest-estimate
+  **69%** of the time at 3× (77/112) and **78%** at 5× (87/112). Its p50 queue wait (3.43 s) is
+  far better than FIFO's (5.94 s).
+- Cause: at K=1 with no preemption, each overdue promotion of a long request blocks every short
+  request behind it for that request's **full** service time, and service is heavy-tailed here
+  (p50 output 407 tokens, p90 918). A few expensive promotions erase the short-job gain in the mean.
+- **A 5× threshold was measured and made everything slightly worse** — fewer promotions (25 vs 35)
+  but each later, with a larger backlog behind it. 3× is the better operating point.
 
----
+**Honest framing, which is a stronger result than the script:** a genuine three-way tradeoff.
+SEJF optimises the body of the latency distribution; Adaptive optimises the tail; FIFO does neither
+well. Bounded wait at K=1 without preemption has a real, measured price.
 
-## 6. API contract — verified compatible, not assumed
-
-Their `scheduler/predictors.py` wraps my code. Both sides' real signatures:
-
-| They call | My signature | |
-| --- | --- | --- |
-| `LengthPredictor.load(artifacts_dir, device=device)` | `load(cls, out_dir, device: str \| None = None)` | ✅ |
-| `.predict(prompt)` → reads `expected_output_tokens`, `uncertainty` | returns those plus `bin_probabilities`; extras ignored | ✅ |
-| `PromptLengthBaseline.load(dir / "baseline.json", tokenizer)` | `load(cls, path, fallback_tokenizer=None)` | ✅ |
-| `datagen.config` constants, `datagen.backends.OpenAICompatBackend(...)` | unchanged this session | ✅ |
-| `splits.json` with `train/val/test` id lists | written by `ml.train` into every artifact dir | ✅ |
-
-**Artifact portability, tested on a simulated fresh host** (copied elsewhere, all network calls
-blocked, `HF_HUB_OFFLINE=1`): loads and predicts fine — it bundles `encoder/` and `tokenizer/`, so
-nothing is fetched at runtime. 3.3 ms on GPU, 11.7–14.5 ms on CPU (0.07% and 0.25–0.31% of the
-4,693 ms median service time).
-
-Two notes for their side:
-- `config.json` carries `prompt_token_counter = "llamacpp:http://127.0.0.1:8080"`. The DistilBERT
-  predictor **ignores** it (verified with the network blocked). Only `LinearBaselinePredictor`
-  would try to reach it, so the baseline path needs llama-server up or that field changed.
-- `scheduler/config.py` sets `SIM_PREDICTOR_LATENCY_MS = 3.0`. Measured is **2.82 ms** on GPU —
-  close enough that the simulations stand, but worth updating in the real-run report.
+An earlier version of this file blamed "mostly FIFO-like mode". That was wrong and is retracted —
+the selection-reason counts above refute it.
 
 ---
 
-## 7. The one input the scheduler side needs from me
+## 5. Configuration of record
 
-Their runbook says: *"write down `artifacts\<winner>`; every command below uses it."*
-
-**Winner: `artifacts\maxlen_512`** — best test MAE (193.1 vs baseline 241.5) and it scaled best
-with data. Use `--predictor distilbert:artifacts\maxlen_512`.
-
-**Conservative alternative: `artifacts\maxlen_128`** — 5.7% worse MAE (204.8) but **half the severe
-underprediction** (0.045 vs 0.089), because it systematically over-predicts (+43.2 mean signed
-error). Since underprediction is what causes head-of-line blocking, if the real run shows 512
-hurting tail latency, swap the flag. Both artifacts exist; no retrain needed.
-
-Success bar, 112 held-out prompts, median service time 4,693 ms:
-
-| Criterion | Requirement | Measured (maxlen_512) | |
-| --- | --- | --- | --- |
-| Test MAE | beat baseline | 193.1 vs 241.5 (20% better) | ✅ |
-| Severe underprediction | beat or tie baseline | 0.089 vs 0.143 | ✅ |
-| Overhead | < 5% of median service time | 2.82 ms = **0.06%** | ✅ |
-
-Passed in **all 9** training runs (3 max_lengths + 6 learning-curve points), so the verdict is not
-an artifact of one split or dataset size.
+| | |
+| --- | --- |
+| Predictor | `distilbert:artifacts\maxlen_512` — test MAE 193.1 vs baseline 241.5, severe under 0.089 vs 0.143, 3.06 ms (0.07% of service time) |
+| Fallback | `artifacts\maxlen_128` — worse MAE, half the severe underprediction. Unused; real runs showed no tail pathology attributable to the predictor |
+| Model | Llama 3.1 8B Instruct Q4_K_M, `b11381-836d57176-win-cuda-12.4-x64` |
+| Decoding | temp 0.7, top_p 0.9, `max_new_tokens` 1024, fixed system prompt (sha `75357d68…`) |
+| Manifest | `dc37a5a86f129b1e`, 112 requests, 7,000 ms mean inter-arrival, seed 42 |
+| MAX_WAIT | derived 3.0 × median, **14,079 ms**; recorded in `run_started` and `summary.json` |
+| Runs on disk | `scheduler_runs\real-{fifo,sejf,adaptive,adaptive-5x}` |
 
 ---
 
-## 8. Dataset caveats the real-run write-up must carry
+## 6. Dataset caveats any write-up must carry
 
 1. **Seeds are not reproducible on this backend.** llama-server reuses the KV/prompt cache by
-   default, so the same request is not repeatable: one case recorded as 1024/`length` in the base
-   run deterministically yields 539/`stop` with `cache_prompt: false`. The four runs per prompt are
-   still four real samples, so the p90 target is valid — but do **not** describe the dataset as
-   reproducible. Full evidence in `STATUS.md`.
-2. **That is why the 2048 extension pass was abandoned.** A cache-affected censored generation
-   cannot be uncensored by re-running it. Its 14 records are quarantined under
-   `data/labels/_quarantine/` and never reached a label set.
-3. **9.87% of runs remain right-censored** (296 of 3,000) across 100 of 750 prompts, all flagged
-   `has_censored_target: true`. `target_max` is pinned at 1024.
-4. **Scope is 750 prompts, not 2000** (cut for time). Test set 112 examples — enough to choose a
-   predictor, thin for a strong accuracy claim.
-5. **The learning curve had not flattened** at 750 (MAE 246.7 → 217.2 → 193.1), so more data would
-   likely still help.
+   default; one request recorded as 1024/`length` in the base run deterministically yields
+   539/`stop` with `cache_prompt: false`. The four runs per prompt are still four real samples, so
+   the p90 target is valid — but do **not** call the dataset reproducible.
+2. **That killed the 2048 extension pass.** A cache-affected censored generation cannot be
+   uncensored by re-running it. Its 14 records are quarantined under `data/labels/_quarantine/`
+   and never reached a label set.
+3. **9.87% of base runs are right-censored** (296/3,000) across 100 of 750 prompts, all flagged
+   `has_censored_target`.
+4. **750 prompts, not 2000** (cut for time); predictor test set 112 examples.
+5. Serving used `max_new_tokens` 1024, so measured output lengths are capped at 1024.
 
 ---
 
-## 9. Ownership, post-merge
+## 7. What remains
 
-| Area | Owner | Notes |
-| --- | --- | --- |
-| `ml/`, `datagen/`, `scripts/`, `requirements.txt`, `pytest.ini` | GPU machine | the scheduler adapts to these, not the reverse |
-| `scheduler/`, `ui/`, `docs/`, `tests/test_scheduler_*`, `requirements-tiger.txt` | other machine | — |
-| `.gitignore`, `tests/conftest.py` | shared | union of both sides, never one side |
-| `STATUS.md` | GPU machine | add a "Scheduler" pointer after merging; don't overwrite ML content |
-| `ORCHESTRATOR_UPDATE.md` | shared coordination | this file |
-
----
-
-## 10. Optional follow-ups, none blocking
-
-1. **Resume the base run toward 1000/2000** for a stronger curve — unattended,
-   `.\scripts\run_generation.ps1 -Detach`, then re-assemble, re-cut checkpoints with `--force`,
-   retrain. Completed prompts are skipped; prompt 751's banked generation is reused.
-2. **A reproducible dataset** needs `"cache_prompt": false` on every request plus a fresh output
-   directory. `datagen/backends.py` does not set it — deliberately left unmade, since adding it to
-   `generation_config()` would break the existing run's resume check. ~8 h for a clean 750.
-3. `llama-server` PID **1420** is still up (5.2 GB VRAM), kept for the baseline's `/tokenize`. The
-   real scheduler run needs it anyway, so leave it unless you need the VRAM.
+1. **Visual dashboard check (~5 min, needs human eyes).** APIs verified serving `measurement=real`
+   and pages return HTTP 200, but the rendered queue reordering, execution timeline, REAL badge and
+   comparison table have **not** been visually confirmed.
+   → http://localhost:3000/?mode=runs&run=real-adaptive
+2. **Record the demo.** `docs/RUNBOOK_REAL_EXPERIMENT.md` §17 and `docs/DEMO_FLOW.md`, with beat 5
+   reframed per section 4 above.
+3. Optional, not needed for the demo: resume label generation toward 1000/2000; a
+   `cache_prompt: false` regeneration for a reproducible dataset (~8 h); more arrival-rate points.
 
 ---
 
-## 11. Corrections to earlier versions of this file
+## 8. Not implemented, by instruction
 
-- The "do not implement yet" list is **withdrawn** — scheduler, Tiger Data, dashboard and UI all
-  exist on the branch.
-- An earlier handoff note offered to add a batched predict call. Unnecessary:
-  **`LengthPredictor.predict_batch(prompts)` already exists** in `ml/predictor.py`.
-- Earlier versions implied there was no git remote and only a 2-commit history. Both wrong: the
-  remote is `efazman/InferenceScheduler26` and master is at `f4a6923` with the ML work committed
-  and pushed.
+K>1 concurrency, multi-GPU, new scheduler policies, dashboard redesign, retraining, max_length
+sweeps, label-set regeneration.
+
+---
+
+## 9. Integration issues found and fixed this session
+
+| Issue | Resolution |
+| --- | --- |
+| `powershell.exe -File` bound only the first token of a `[string[]]` parameter, so the driver ran FIFO only then reported "all policies done" | policies passed as a comma-separated string, split in-script, with a guard that throws on an empty list |
+| A first FIFO run overlapped a background Node install, biasing that run's latencies specifically | discarded at 225 events and re-run on an idle machine (CPU 7%, GPU 0%) |
+| `winget install` hung on a UAC prompt it could not display non-interactively (exit 255) | Node installed with elevation; dashboard then built clean |
+| `core.autocrlf` would rewrite `scripts/*.sh` to CRLF and break them on a fresh clone | `.gitattributes` with `*.sh text eol=lf` (`324a9bc`) |
+| `npm install` under npm 11 stripped 4 `"peer": true` markers from the Mac's lockfile | reverted; their lockfile left pristine |
+| Checkpoint summaries reported 0 censored runs for assembled labels (field renamed) | `_truncated_runs()` fallback in `datagen/make_checkpoint.py` |
