@@ -1,0 +1,2 @@
+# Shell scripts must stay LF: CRLF breaks them under bash/MSYS on a fresh clone.
+*.sh text eol=lf
